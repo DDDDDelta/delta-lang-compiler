@@ -15,7 +15,7 @@ use inkwell::values::{
 };
 use inkwell::{ AddressSpace };
 
-use crate::ast::decl::{ FnDecl, NamedDecl, TopLevelDecl, VarDecl };
+use crate::ast::decl::{ FnDecl, NamedDecl, TopLevelDecl, VarDecl, LocalDecl };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
 use crate::ast::expr::{ Expr };
 
@@ -131,6 +131,33 @@ impl<'ctx> IRGen<'ctx> {
         self.module.add_function(name, fn_type, Some(Linkage::External))
     }
 
+    pub fn gen_local_decl(
+        &self,
+        decl: &LocalDecl
+    ) {
+        match decl {
+            LocalDecl::Var(var_decl) => {
+                self.gen_var(var_decl);
+            }
+        }
+    }
+
+    pub fn gen_var(
+        &self,
+        decl: &VarDecl
+    ) -> PointerValue<'ctx> {
+        let alloca = self.builder.build_alloca(
+            self.context.i32_type(), 
+            decl.name()
+        )
+        .unwrap();
+
+        let initializer = self.gen_expr_non_void(decl.initializer());
+        let _ = self.builder.build_store(alloca, initializer);
+
+        alloca
+    }
+
     pub fn gen_function(
         &self,
         decl: &FnDecl
@@ -168,6 +195,9 @@ impl<'ctx> IRGen<'ctx> {
             }
             Stmt::Expr(expr) => {
                 let _ = self.gen_expr(expr);
+            }
+            Stmt::LocalDecl(decl) => {
+                self.gen_local_decl(decl);
             }
         }
     }
@@ -211,7 +241,7 @@ impl<'ctx> IRGen<'ctx> {
                 }
 
                 let fn_value = self.module.get_function(callee).unwrap();
-                // calling a function can result in 
+                // calling a function can result in void type
                 match self.builder.build_call(fn_value, &arg_values.as_slice(), "")
                     .unwrap().try_as_basic_value() {
                         Either::Left(v) => Some(v),

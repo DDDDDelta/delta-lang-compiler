@@ -5,7 +5,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use ast::decl::{TopLevelDecl, VarDecl};
+use ast::decl::{LocalDecl, TopLevelDecl, VarDecl};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{ Linkage, Module };
@@ -69,8 +69,32 @@ fn main() {
         Expr::Int(15)
     );
 
+    let localvardecl = VarDecl::new(
+        "v2".to_string(),
+        Expr::Int(20)
+    );
+
+    let local_fn_decl = FnDecl::new(
+        "local_var".to_string(), 
+        vec![
+            Stmt::LocalDecl(
+                LocalDecl::Var(Box::new(localvardecl))
+            ),
+            Stmt::Return(
+                Box::new(
+                    ReturnStmt::new(
+                        Some(
+                            Expr::Int(0)
+                        )
+                    )
+                )
+            )
+        ]
+    );
+
     let program: Vec<TopLevelDecl> = vec![
         TopLevelDecl::Fn(Box::new(fn_decl)),
+        TopLevelDecl::Fn(Box::new(local_fn_decl)),
         TopLevelDecl::Var(Box::new(vardecl))
     ];
 

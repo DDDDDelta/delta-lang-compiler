@@ -3,12 +3,12 @@ use subenum::subenum;
 use crate::ast::stmt::Stmt;
 use crate::ast::expr::Expr;
 
-#[subenum(TopLevelDecl)]
+#[subenum(TopLevelDecl, LocalDecl)]
 pub enum Decl {
     #[subenum(TopLevelDecl)]
     Fn(Box<FnDecl>),
     
-    #[subenum(TopLevelDecl)]
+    #[subenum(TopLevelDecl, LocalDecl)]
     Var(Box<VarDecl>),
 }
 

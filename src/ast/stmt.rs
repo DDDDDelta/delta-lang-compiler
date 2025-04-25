@@ -1,8 +1,11 @@
 use crate::ast::expr::Expr;
 
+use crate::ast::decl::LocalDecl;
+
 pub enum Stmt {
     Expr(Expr),
     Return(Box<ReturnStmt>),
+    LocalDecl(LocalDecl),
 }
 
 pub struct ReturnStmt {
