@@ -1,19 +1,55 @@
+use std::rc::Rc;
+
 use subenum::subenum;
 
 use crate::ast::stmt::Stmt;
 use crate::ast::expr::Expr;
 
-#[subenum(TopLevelDecl, LocalDecl)]
+
+#[subenum(
+    TopLevelDecl, 
+    LocalDecl, 
+    NamedDecl
+)]
+#[derive(Clone)]
 pub enum Decl {
-    #[subenum(TopLevelDecl)]
-    Fn(Box<FnDecl>),
+    #[subenum(TopLevelDecl, NamedDecl)]
+    Fn(Rc<FnDecl>),
     
-    #[subenum(TopLevelDecl, LocalDecl)]
-    Var(Box<VarDecl>),
+    #[subenum(TopLevelDecl, LocalDecl, NamedDecl)]
+    Var(Rc<VarDecl>),
 }
 
 
-pub trait NamedDecl {
+impl Decl {
+    pub fn ptr_eq(lhs: &Self, rhs: &Self) -> bool {
+        match (lhs, rhs) {
+            (Decl::Fn(a), Decl::Fn(b)) => Rc::ptr_eq(a, b),
+            (Decl::Var(a), Decl::Var(b)) => Rc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+}
+
+impl LocalDecl {
+    pub fn ptr_eq(lhs: &Self, rhs: &Self) -> bool {
+        match (lhs, rhs) {
+            (LocalDecl::Var(a), LocalDecl::Var(b)) => Rc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+}
+
+impl Named for NamedDecl {
+    fn name(&self) -> &str {
+        match self {
+            NamedDecl::Fn(decl) => decl.name(),
+            NamedDecl::Var(decl) => decl.name(),
+        }
+    }
+}
+
+pub trait Named {
     fn name(&self) -> &str;
 }
 
@@ -36,7 +72,7 @@ impl FnDecl {
     }
 }
 
-impl NamedDecl for FnDecl {
+impl Named for FnDecl {
     fn name(&self) -> &str {
         &self.name
     }
@@ -61,7 +97,7 @@ impl VarDecl {
     }
 }
 
-impl NamedDecl for VarDecl {
+impl Named for VarDecl {
     fn name(&self) -> &str {
         &self.name
     }

@@ -1,4 +1,7 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ptr::null;
+use std::rc::Rc;
 
 use either::Either;
 
@@ -15,7 +18,7 @@ use inkwell::values::{
 };
 use inkwell::{ AddressSpace };
 
-use crate::ast::decl::{ FnDecl, NamedDecl, TopLevelDecl, VarDecl, LocalDecl };
+use crate::ast::decl::{ Decl, FnDecl, LocalDecl, Named, TopLevelDecl, VarDecl };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
 use crate::ast::expr::{ Expr };
 
@@ -23,6 +26,91 @@ pub struct IRGen<'ctx> {
     context: &'ctx Context, 
     module: Module<'ctx>, 
     builder: Builder<'ctx>,
+    globals: GlobalTracker<'ctx>,
+}
+
+struct GlobalTracker<'ctx> {
+    pub globals: RefCell<Vec<(Decl, GlobalValue<'ctx>)>>,
+    pub functions: RefCell<Vec<(Decl, FunctionValue<'ctx>)>>,
+}
+
+impl<'ctx> GlobalTracker<'ctx> {
+    pub fn new() -> Self {
+        GlobalTracker { globals: RefCell::new(Vec::new()), functions: RefCell::new(Vec::new()) }
+    }
+
+    pub fn add_global(&self, decl: Decl, value: GlobalValue<'ctx>) {
+        self.globals.borrow_mut().push((decl, value));
+    }
+
+    pub fn add_function(&self, decl: Decl, value: FunctionValue<'ctx>) {
+        self.functions.borrow_mut().push((decl, value));
+    }
+
+    pub fn get_global(&self, decl: &Decl) -> Option<GlobalValue<'ctx>> {
+        if let Some(fdecl) = self.get_function(decl) {
+            return Some(fdecl.as_global_value());
+        }
+        if let Some(vdecl) = self.get_global_var(decl) {
+            return Some(vdecl);
+        }
+
+        None
+    }
+
+    pub fn get_function(&self, decl: &Decl) -> Option<FunctionValue<'ctx>> {
+        for (d, v) in self.functions.borrow().iter() {
+            if Decl::ptr_eq(d, decl) {
+                return Some(*v);
+            }
+        }
+
+        None
+    }
+
+    pub fn get_global_var(&self, decl: &Decl) -> Option<GlobalValue<'ctx>> {
+        for (d, v) in self.globals.borrow().iter() {
+            if Decl::ptr_eq(d, decl) {
+                return Some(*v);
+            }
+        }
+
+        None
+    }
+}
+
+pub struct LocalTracker<'ctx> {
+    pub prev: *const LocalTracker<'ctx>,
+    pub vars: Vec<(LocalDecl, PointerValue<'ctx>)>,
+}
+
+impl<'ctx> LocalTracker<'ctx> {
+    pub fn empty() -> Self {
+        LocalTracker { prev: null(), vars: Vec::new() }
+    }
+
+    pub fn new(prev: &LocalTracker<'ctx>) -> Self {
+        LocalTracker { prev, vars: Vec::new() }
+    }
+
+    pub fn add(&mut self, decl: LocalDecl, value: PointerValue<'ctx>) {
+        self.vars.push((decl, value));
+    }
+
+    pub fn get(&self, decl: &LocalDecl) -> Option<PointerValue<'ctx>> {
+        for (d, v) in &self.vars {
+            if LocalDecl::ptr_eq(d, decl) {
+                return Some(*v);
+            }
+        }
+
+        if self.prev != null() {
+            unsafe { (*self.prev).get(decl) }
+        }
+        else {
+            None
+        }
+    }
 }
 
 impl<'ctx> IRGen<'ctx> {
@@ -32,7 +120,10 @@ impl<'ctx> IRGen<'ctx> {
         module.set_data_layout(&target.get_target_data().get_data_layout());
 
         let builder = ctx.create_builder();
-        let ret = IRGen { context: ctx, module, builder };
+        let ret = IRGen { 
+            context: ctx, module, builder, 
+            globals: GlobalTracker::new(),
+        };
         ret.setup_builtin_decls();
         ret
     }
@@ -67,11 +158,19 @@ impl<'ctx> IRGen<'ctx> {
     ) {
         for decl in decls {
             match decl {
-                TopLevelDecl::Fn(decl) => {
-                    self.gen_function(decl);
+                TopLevelDecl::Fn(fn_decl) => {
+                    let func = self.gen_function(fn_decl);
+                    self.globals.add_function(
+                        decl.clone().into(), 
+                        func
+                    );
                 }
-                TopLevelDecl::Var(decl) => {
-                    self.gen_global_var(decl);
+                TopLevelDecl::Var(var_decl) => {
+                    let value = self.gen_global_var(var_decl);
+                    self.globals.add_global(
+                        decl.clone().into(), 
+                        value
+                    );
                 }
             }
         }
@@ -81,7 +180,10 @@ impl<'ctx> IRGen<'ctx> {
         &self,
         decl: &VarDecl
     ) -> GlobalValue<'ctx> {
-        let initializer = self.gen_expr_non_void(decl.initializer());
+        let initializer = self.gen_expr_non_void(
+            decl.initializer(), 
+            &LocalTracker::empty() // no value needed to be tracked for global vars
+        );
         let ret = self.gen_global_var_impl(
             decl.name(), 
             self.context.i32_type(), 
@@ -133,18 +235,21 @@ impl<'ctx> IRGen<'ctx> {
 
     pub fn gen_local_decl(
         &self,
-        decl: &LocalDecl
+        decl: &LocalDecl,
+        tracker: &mut LocalTracker<'ctx>
     ) {
         match decl {
             LocalDecl::Var(var_decl) => {
-                self.gen_var(var_decl);
+                self.gen_var(var_decl, decl.clone(), tracker);
             }
         }
     }
 
     pub fn gen_var(
         &self,
-        decl: &VarDecl
+        decl: &VarDecl,
+        decl_enum: LocalDecl,
+        tracker: &mut LocalTracker<'ctx>
     ) -> PointerValue<'ctx> {
         let alloca = self.builder.build_alloca(
             self.context.i32_type(), 
@@ -152,7 +257,9 @@ impl<'ctx> IRGen<'ctx> {
         )
         .unwrap();
 
-        let initializer = self.gen_expr_non_void(decl.initializer());
+        tracker.add(decl_enum, alloca);
+
+        let initializer = self.gen_expr_non_void(decl.initializer(), tracker);
         let _ = self.builder.build_store(alloca, initializer);
 
         alloca
@@ -169,11 +276,13 @@ impl<'ctx> IRGen<'ctx> {
             false
         );
 
+        let mut tracker = LocalTracker::empty();
+
         let entry = self.context.append_basic_block(func, "entry");
         self.builder.position_at_end(entry);
 
         for stmt in decl.body() {
-            self.gen_stmt(stmt);
+            self.gen_stmt(stmt, &mut tracker);
         }
 
         func
@@ -181,12 +290,13 @@ impl<'ctx> IRGen<'ctx> {
 
     pub fn gen_stmt(
         &self,
-        stmt: &Stmt
+        stmt: &Stmt,
+        tracker: &mut LocalTracker<'ctx>
     ) {
         match stmt {
             Stmt::Return(return_stmt) => {
                 if let Some(expr) = return_stmt.returned() {
-                    let ret = self.gen_expr(expr);
+                    let ret = self.gen_expr(expr, tracker);
                     self.builder.build_return(Some(&ret.unwrap())).unwrap();
                 }
                 else { 
@@ -194,17 +304,18 @@ impl<'ctx> IRGen<'ctx> {
                 }
             }
             Stmt::Expr(expr) => {
-                let _ = self.gen_expr(expr);
+                let _ = self.gen_expr(expr, tracker);
             }
             Stmt::LocalDecl(decl) => {
-                self.gen_local_decl(decl);
+                self.gen_local_decl(decl, tracker);
             }
         }
     }
 
     pub fn gen_expr_non_void(
         &self,
-        expr: &Expr
+        expr: &Expr,
+        tracker: &LocalTracker<'ctx>
     ) -> BasicValueEnum<'ctx> {
         match expr {
             Expr::Int(i) => 
@@ -220,14 +331,41 @@ impl<'ctx> IRGen<'ctx> {
                 global_str.as_pointer_value().into()
             }
 
-            _ => self.gen_expr(expr).unwrap()
+            // support variable reference only
+            Expr::DeclRef(decl) => {
+                match decl {
+                    Decl::Var(var_decl) => {
+                        if let Some(value) = tracker.get(&LocalDecl::Var(var_decl.clone())) {
+                            self.builder.build_load(
+                                self.context.i32_type(), 
+                                value, 
+                                var_decl.name()
+                            ).unwrap().into()
+                        }
+                        else if let Some(value) = self.globals.get_global_var(decl) {
+                            self.builder.build_load(
+                                self.context.i32_type(), 
+                                value.as_pointer_value(), 
+                                var_decl.name()
+                            ).unwrap().into()
+                        }
+                        else {
+                            panic!("variable `{}` not found", var_decl.name());
+                        }
+                    }
+                    Decl::Fn(_) => panic!("function reference not supported")
+                }
+            }
+
+            _ => self.gen_expr(expr, tracker).unwrap()
         }
     }
 
     // helper, only for expressions that can be void
     fn gen_expr_voidable_only(
         &self,
-        expr: &Expr
+        expr: &Expr,
+        tracker: &LocalTracker<'ctx>
     ) -> Option<BasicValueEnum<'ctx>> {
         match expr {
             Expr::Call(call) => {
@@ -237,7 +375,7 @@ impl<'ctx> IRGen<'ctx> {
                 for arg in call.args() {
                     // obviously, we cannot call a function with an expression with value type void
                     // frontend must catch this
-                    arg_values.push(self.gen_expr_non_void(arg).into());
+                    arg_values.push(self.gen_expr_non_void(arg, tracker).into());
                 }
 
                 let fn_value = self.module.get_function(callee).unwrap();
@@ -256,14 +394,15 @@ impl<'ctx> IRGen<'ctx> {
     // this function returns None if the expr has a void type
     pub fn gen_expr(
         &self,
-        expr: &Expr
+        expr: &Expr,
+        tracker: &LocalTracker<'ctx>
     ) -> Option<BasicValueEnum<'ctx>> {
         match expr {
-            Expr::Int(_) | Expr::Str(_) => 
-                Some(self.gen_expr_non_void(expr)),
+            Expr::Int(_) | Expr::Str(_) | Expr::DeclRef(_) => 
+                Some(self.gen_expr_non_void(expr, tracker)),
 
             Expr::Call(_) => 
-                self.gen_expr_voidable_only(expr),
+                self.gen_expr_voidable_only(expr, tracker),
         }
     }
 }

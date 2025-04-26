@@ -2,10 +2,11 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
+use std::rc::Rc;
 
-use ast::decl::{LocalDecl, TopLevelDecl, VarDecl};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{ Linkage, Module };
@@ -14,7 +15,7 @@ use inkwell::targets::{ Target, TargetMachine, InitializationConfig, TargetTripl
 use inkwell::values::{ BasicValueEnum, FunctionValue, InstructionValue, PointerValue };
 use inkwell::{ AddressSpace, OptimizationLevel };
 
-use crate::ast::decl::FnDecl;
+use crate::ast::decl::{ Decl, LocalDecl, TopLevelDecl, VarDecl, FnDecl };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
 use crate::ast::expr::{ Expr, CallExpr };
 
@@ -30,13 +31,27 @@ fn main() {
     let object_file = output_file.to_string() + ".o";
 
     // ast
+    let localvardecl = Decl::Var(Rc::new(VarDecl::new(
+        "local".to_string(),
+        Expr::Int(15)
+    )));
+
+    let globalvardecl = Decl::Var(Rc::new(VarDecl::new(
+        "global".to_string(),
+        Expr::Int(20)
+    )));
+
+    let declreflocal = Expr::DeclRef(localvardecl.clone());
+    let declrefglobal = Expr::DeclRef(globalvardecl.clone());
+
     let stmt_list = vec![
+        Stmt::LocalDecl(localvardecl.try_into().unwrap()),
         Stmt::Expr(
             Expr::Call(
                 Box::new(CallExpr::new(
                     "printf".to_string(), 
                     vec![
-                        Expr::Str("Hello, World!".to_string())
+                        Expr::Str("Hello, World!\n".to_string()),
                     ]
                 ))
             )
@@ -44,8 +59,12 @@ fn main() {
         Stmt::Expr(
             Expr::Call(
                 Box::new(CallExpr::new(
-                    "vardecl".to_string(), 
-                    vec![]
+                    "printf".to_string(), 
+                    vec![
+                        Expr::Str("local: %d\nglobal: %d\n".to_string()),
+                        declreflocal,
+                        declrefglobal
+                    ]
                 ))
             )
         ),
@@ -78,7 +97,7 @@ fn main() {
         "local_var".to_string(), 
         vec![
             Stmt::LocalDecl(
-                LocalDecl::Var(Box::new(localvardecl))
+                LocalDecl::Var(Rc::new(localvardecl))
             ),
             Stmt::Return(
                 Box::new(
@@ -93,9 +112,10 @@ fn main() {
     );
 
     let program: Vec<TopLevelDecl> = vec![
-        TopLevelDecl::Fn(Box::new(fn_decl)),
-        TopLevelDecl::Fn(Box::new(local_fn_decl)),
-        TopLevelDecl::Var(Box::new(vardecl))
+        globalvardecl.try_into().unwrap(),
+        TopLevelDecl::Fn(Rc::new(fn_decl)),
+        TopLevelDecl::Fn(Rc::new(local_fn_decl)),
+        TopLevelDecl::Var(Rc::new(vardecl))
     ];
 
     // code gen init
@@ -260,6 +280,20 @@ fn main() {
             return;
         }
     }
+
+    println!("");
+
+    // asm insepction
+    let buffer = target_machine
+        .write_to_memory_buffer(
+            &module,
+            inkwell::targets::FileType::Assembly, 
+        )
+        .expect("Failed to create assembly buffer.");
+
+    std::io::stdout()
+        .write_all(buffer.as_slice())
+        .expect("Failed to write assembly buffer to stdout.");
 
     // object code emittion
     let result = target_machine

@@ -1,7 +1,12 @@
+use std::rc::Rc;
+
+use crate::ast::decl::Decl;
+
 pub enum Expr {
     Int(i32),
     Str(String),
     Call(Box<CallExpr>),
+    DeclRef(Decl),
 }
 
 pub struct CallExpr {
