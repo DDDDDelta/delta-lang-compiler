@@ -16,11 +16,11 @@ use inkwell::values::{
     BasicValueEnum, FunctionValue, GlobalValue, 
     InstructionValue, PointerValue 
 };
-use inkwell::{ AddressSpace };
+use inkwell::AddressSpace;
 
 use crate::ast::decl::{ Decl, FnDecl, LocalDecl, Named, TopLevelDecl, VarDecl };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
-use crate::ast::expr::{ Expr };
+use crate::ast::expr::Expr;
 
 pub struct IRGen<'ctx> {
     context: &'ctx Context, 
@@ -325,7 +325,7 @@ impl<'ctx> IRGen<'ctx> {
                 let global_str = self.module.add_global(
                     self.context.i8_type().array_type(s.len() as u32 + 1), 
                     None, 
-                    "msg"
+                    ""
                 );
                 global_str.set_initializer(&self.context.const_string(s.as_bytes(), true));
                 global_str.as_pointer_value().into()
@@ -334,26 +334,53 @@ impl<'ctx> IRGen<'ctx> {
             // support variable reference only
             Expr::DeclRef(decl) => {
                 match decl {
+                    // reference on vardecl is a lvalue represented as a pointer
                     Decl::Var(var_decl) => {
                         if let Some(value) = tracker.get(&LocalDecl::Var(var_decl.clone())) {
-                            self.builder.build_load(
-                                self.context.i32_type(), 
-                                value, 
-                                var_decl.name()
-                            ).unwrap().into()
+                            return value.into();
                         }
-                        else if let Some(value) = self.globals.get_global_var(decl) {
-                            self.builder.build_load(
-                                self.context.i32_type(), 
-                                value.as_pointer_value(), 
-                                var_decl.name()
-                            ).unwrap().into()
+                        else if let Some(value) = self.globals.get_global_var(decl) { 
+                            return value.as_pointer_value().into();
                         }
                         else {
                             panic!("variable `{}` not found", var_decl.name());
                         }
                     }
                     Decl::Fn(_) => panic!("function reference not supported")
+                }
+            }
+
+            Expr::RValueCast(cast) => {
+                let operand = cast.operand();
+                // expects a pointer value which is obviously non-void
+                let value = self.gen_expr_non_void(operand, tracker);
+                match value {
+                    BasicValueEnum::PointerValue(v) => {
+                        // rvalue cast represents a load from a pointer
+                        let loaded = self.builder.build_load(
+                            self.context.i32_type(), 
+                            v, 
+                            "rvalue_cast"
+                        ).unwrap();
+                        return loaded.into();
+                    },
+                    _ => panic!("expect a pointer value (represents a lvalue) for a rvalue cast")
+                }
+            }
+
+            Expr::Assign(assign) => {
+                let lhs = assign.lhs();
+                let rhs = assign.rhs();
+
+                // expects a pointer value which is obviously non-void
+                let value = self.gen_expr_non_void(lhs, tracker);
+                match value {
+                    BasicValueEnum::PointerValue(v) => {
+                        let rhs_value = self.gen_expr_non_void(rhs, tracker);
+                        let _ = self.builder.build_store(v, rhs_value);
+                        return v.into();
+                    },
+                    _ => panic!("expect a pointer value (represents a lvalue) for an assignment")
                 }
             }
 
@@ -398,7 +425,8 @@ impl<'ctx> IRGen<'ctx> {
         tracker: &LocalTracker<'ctx>
     ) -> Option<BasicValueEnum<'ctx>> {
         match expr {
-            Expr::Int(_) | Expr::Str(_) | Expr::DeclRef(_) => 
+            Expr::Int(_) | Expr::Str(_) | Expr::DeclRef(_) | 
+            Expr::RValueCast(_) | Expr::Assign(_) => 
                 Some(self.gen_expr_non_void(expr, tracker)),
 
             Expr::Call(_) => 

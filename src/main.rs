@@ -7,6 +7,7 @@ use std::path::Path;
 use std::process::Command;
 use std::rc::Rc;
 
+use ast::expr::{AssignExpr, RValueCastExpr};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{ Linkage, Module };
@@ -41,6 +42,11 @@ fn main() {
         Expr::Int(20)
     )));
 
+    let localvardecl2 = Decl::Var(Rc::new(VarDecl::new(
+        "local2".to_string(),
+        Expr::Int(25)
+    )));
+
     let declreflocal = Expr::DeclRef(localvardecl.clone());
     let declrefglobal = Expr::DeclRef(globalvardecl.clone());
 
@@ -62,8 +68,32 @@ fn main() {
                     "printf".to_string(), 
                     vec![
                         Expr::Str("local: %d\nglobal: %d\n".to_string()),
-                        declreflocal,
-                        declrefglobal
+                        Expr::RValueCast(
+                            Box::new(RValueCastExpr::new(
+                                Expr::Assign(Box::new(AssignExpr::new(
+                                    Expr::Assign(Box::new(AssignExpr::new(
+                                        declreflocal,
+                                        Expr::Int(114514)
+                                    ))),
+                                    Expr::Int(1919810)
+                                )))
+                            ))
+                        ),
+                        Expr::RValueCast(
+                            Box::new(RValueCastExpr::new(declrefglobal))
+                        ),
+                    ]
+                ))
+            )
+        ),
+        Stmt::LocalDecl(localvardecl2.clone().try_into().unwrap()),
+        Stmt::Expr(
+            Expr::Call(
+                Box::new(CallExpr::new(
+                    "printf".to_string(), 
+                    vec![
+                        Expr::Str("local2: %d\n".to_string()),
+                        Expr::RValueCast(Box::new(RValueCastExpr::new(Expr::DeclRef(localvardecl2)))),
                     ]
                 ))
             )
