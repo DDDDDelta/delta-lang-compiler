@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt::Binary;
 use std::ptr::null;
 use std::rc::Rc;
 
@@ -12,15 +13,14 @@ use inkwell::module::{ Linkage, Module };
 use inkwell::targets::TargetMachine;
 use inkwell::types::{ BasicMetadataTypeEnum, BasicType, BasicTypeEnum, IntType };
 use inkwell::values::{ 
-    AnyValue, BasicMetadataValueEnum, BasicValue, 
-    BasicValueEnum, FunctionValue, GlobalValue, 
-    InstructionValue, PointerValue 
+    AnyValue, BasicMetadataValueEnum, BasicValue, BasicValueEnum, 
+    FunctionValue, GlobalValue, InstructionValue, IntValue, PointerValue 
 };
 use inkwell::AddressSpace;
 
 use crate::ast::decl::{ Decl, FnDecl, LocalDecl, Named, TopLevelDecl, VarDecl };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
-use crate::ast::expr::Expr;
+use crate::ast::expr::{BinaryExpr, BinaryOp, Expr};
 
 pub struct IRGen<'ctx> {
     context: &'ctx Context, 
@@ -312,6 +312,52 @@ impl<'ctx> IRGen<'ctx> {
         }
     }
 
+    fn gen_binary_expr(
+        &self,
+        expr: &BinaryExpr,
+        tracker: &LocalTracker<'ctx>
+    ) -> BasicValueEnum<'ctx> {
+        let lhs = self.gen_expr_non_void(expr.lhs(), tracker);
+        let rhs = self.gen_expr_non_void(expr.rhs(), tracker);
+        let lhs = match lhs {
+            BasicValueEnum::IntValue(v) => v,
+            _ => panic!("expect an integer value for binary expression")
+        };
+        let rhs = match rhs {
+            BasicValueEnum::IntValue(v) => v,
+            _ => panic!("expect an integer value for binary expression")
+        };
+
+        let op = expr.op();
+
+        match op {
+            BinaryOp::Add => 
+                self.builder.build_int_add(
+                    lhs, rhs, ""
+                ).unwrap().into(),
+
+            BinaryOp::Sub => 
+                self.builder.build_int_sub(
+                    lhs, rhs, ""
+                ).unwrap().into(),
+
+            BinaryOp::Mul => 
+                self.builder.build_int_mul(
+                    lhs, rhs, ""
+                ).unwrap().into(),
+
+            BinaryOp::Div => 
+                self.builder.build_int_signed_div(
+                    lhs, rhs, ""
+                ).unwrap().into(),
+
+            BinaryOp::Mod =>
+                self.builder.build_int_signed_rem(
+                    lhs, rhs, ""
+                ).unwrap().into(),
+        }
+    }
+
     pub fn gen_expr_non_void(
         &self,
         expr: &Expr,
@@ -384,6 +430,10 @@ impl<'ctx> IRGen<'ctx> {
                 }
             }
 
+            Expr::Binary(binary) => {
+                return self.gen_binary_expr(binary, tracker);
+            }
+
             _ => self.gen_expr(expr, tracker).unwrap()
         }
     }
@@ -426,7 +476,7 @@ impl<'ctx> IRGen<'ctx> {
     ) -> Option<BasicValueEnum<'ctx>> {
         match expr {
             Expr::Int(_) | Expr::Str(_) | Expr::DeclRef(_) | 
-            Expr::RValueCast(_) | Expr::Assign(_) => 
+            Expr::RValueCast(_) | Expr::Assign(_) | Expr::Binary(_) => 
                 Some(self.gen_expr_non_void(expr, tracker)),
 
             Expr::Call(_) => 

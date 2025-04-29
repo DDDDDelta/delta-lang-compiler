@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Command;
 use std::rc::Rc;
 
-use ast::expr::{AssignExpr, RValueCastExpr};
+use ast::expr::{AssignExpr, BinaryExpr, BinaryOp, RValueCastExpr};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{ Linkage, Module };
@@ -73,9 +73,15 @@ fn main() {
                                 Expr::Assign(Box::new(AssignExpr::new(
                                     Expr::Assign(Box::new(AssignExpr::new(
                                         declreflocal,
-                                        Expr::Int(114514)
+                                        Expr::Int(-1)
                                     ))),
-                                    Expr::Int(1919810)
+                                    Expr::Binary(Box::new(BinaryExpr::new(
+                                        BinaryOp::Add,
+                                        Expr::Int(2),
+                                        Expr::RValueCast(Box::new(RValueCastExpr::new(
+                                            Expr::DeclRef(globalvardecl.clone())
+                                        )))
+                                    )))
                                 )))
                             ))
                         ),

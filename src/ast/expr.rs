@@ -9,12 +9,16 @@ pub enum Expr {
     RValueCast(Box<RValueCastExpr>),
     DeclRef(Decl),
     Assign(Box<AssignExpr>),
+    Binary(Box<BinaryExpr>),
 }
 
 impl Expr {
     pub fn value_category(&self) -> ValueCategory {
         match self {
-            Expr::Int(_) | Expr::Str(_) | Expr::Call(_) | Expr::RValueCast(_) => ValueCategory::RValue,
+            Expr::Int(_) | Expr::Str(_) | Expr::Call(_) | 
+            Expr::RValueCast(_) | Expr::Binary(_)
+                => ValueCategory::RValue,
+                
             Expr::DeclRef(_) | Expr::Assign(_) => ValueCategory::LValue,
         }
     }
@@ -42,11 +46,6 @@ impl ValueCategory {
     pub fn is_rvalue(&self) -> bool {
         matches!(self, ValueCategory::RValue)
     }
-}
-
-#[derive(Clone)]
-pub struct ExprCommon {
-    value_category: ValueCategory,
 }
 
 pub struct RValueCastExpr {
@@ -93,30 +92,70 @@ impl CallExpr {
 }
 
 pub struct AssignExpr {
-    lhs: Expr,
-    rhs: Expr,
+    exprs: [Expr; 2],
 }
 
 impl AssignExpr {
     pub fn new(lhs: Expr, rhs: Expr) -> Self {  
         assert!(lhs.is_lvalue());
         assert!(rhs.is_rvalue());
-        AssignExpr { lhs, rhs }
+        AssignExpr { exprs: [lhs, rhs] }
     }
 
     pub fn lhs(&self) -> &Expr {
-        &self.lhs
+        &self.exprs[0]
     }
 
     pub fn rhs(&self) -> &Expr {
-        &self.rhs
+        &self.exprs[1]
     }
 
     pub fn lhs_mut(&mut self) -> &mut Expr {
-        &mut self.lhs
+        &mut self.exprs[0]
     }
 
     pub fn rhs_mut(&mut self) -> &mut Expr {
-        &mut self.rhs
+        &mut self.exprs[1]
+    }
+}
+
+pub enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+}
+
+pub struct BinaryExpr {
+    op: BinaryOp,
+    exprs: [Expr; 2],
+}
+
+impl BinaryExpr {
+    pub fn new(op: BinaryOp, lhs: Expr, rhs: Expr) -> Self {
+        assert!(lhs.is_rvalue());
+        assert!(rhs.is_rvalue());
+        BinaryExpr { op, exprs: [lhs, rhs] }
+    }
+
+    pub fn op(&self) -> &BinaryOp {
+        &self.op
+    }
+
+    pub fn lhs(&self) -> &Expr {
+        &self.exprs[0]
+    }
+
+    pub fn rhs(&self) -> &Expr {
+        &self.exprs[1]
+    }
+
+    pub fn lhs_mut(&mut self) -> &mut Expr {
+        &mut self.exprs[0]
+    }
+
+    pub fn rhs_mut(&mut self) -> &mut Expr {
+        &mut self.exprs[1]
     }
 }
