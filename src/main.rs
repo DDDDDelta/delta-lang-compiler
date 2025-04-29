@@ -7,7 +7,6 @@ use std::path::Path;
 use std::process::Command;
 use std::rc::Rc;
 
-use ast::expr::{AssignExpr, BinaryExpr, BinaryOp, RValueCastExpr};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{ Linkage, Module };
@@ -18,12 +17,15 @@ use inkwell::{ AddressSpace, OptimizationLevel };
 
 use crate::ast::decl::{ Decl, LocalDecl, TopLevelDecl, VarDecl, FnDecl };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
-use crate::ast::expr::{ Expr, CallExpr };
+use crate::ast::expr::{ Expr, CallExpr, AssignExpr, BinaryExpr, BinaryOp, RValueCastExpr };
+use crate::parse::parser::Parser;
 
 use crate::code_gen::ir_gen::IRGen;
 
 mod code_gen;
 mod ast;
+mod parse;
+mod lex;
 
 fn main() {
     // arg processing
