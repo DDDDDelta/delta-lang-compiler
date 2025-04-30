@@ -79,6 +79,6 @@ use crate::lex::token::{ Token, TokenKind };
  *     | add_expr
  *     ;
  */
-pub struct Parser {
-    lexer: Lexer,
+pub struct Parser<'s> {
+    lexer: Lexer<'s>,
 }

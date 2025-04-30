@@ -19,7 +19,6 @@ use crate::ast::decl::{ Decl, LocalDecl, TopLevelDecl, VarDecl, FnDecl };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
 use crate::ast::expr::{ Expr, CallExpr, AssignExpr, BinaryExpr, BinaryOp, RValueCastExpr };
 use crate::parse::parser::Parser;
-
 use crate::code_gen::ir_gen::IRGen;
 
 mod code_gen;
