@@ -20,7 +20,7 @@ use inkwell::AddressSpace;
 
 use crate::ast::decl::{ Decl, FnDecl, LocalDecl, Named, TopLevelDecl, VarDecl };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
-use crate::ast::expr::{BinaryExpr, BinaryOp, Expr};
+use crate::ast::expr::{ BinaryExpr, BinaryOp, Expr };
 
 pub struct IRGen<'ctx> {
     context: &'ctx Context, 
@@ -30,6 +30,7 @@ pub struct IRGen<'ctx> {
 }
 
 struct GlobalTracker<'ctx> {
+    // TODO: refactor this bs, maybe make all IRGen methods mut
     pub globals: RefCell<Vec<(Decl, GlobalValue<'ctx>)>>,
     pub functions: RefCell<Vec<(Decl, FunctionValue<'ctx>)>>,
 }
@@ -79,6 +80,7 @@ impl<'ctx> GlobalTracker<'ctx> {
     }
 }
 
+// tree structure for value tracking, must insure prev lives loneger than self
 pub struct LocalTracker<'ctx> {
     pub prev: *const LocalTracker<'ctx>,
     pub vars: Vec<(LocalDecl, PointerValue<'ctx>)>,
@@ -113,6 +115,8 @@ impl<'ctx> LocalTracker<'ctx> {
     }
 }
 
+// builder returns Result::Error(BuilderError) mostly for unset position
+// we generally assume we always set the position before building, so we can unwrap
 impl<'ctx> IRGen<'ctx> {
     pub fn new(ctx: &'ctx Context, target: &TargetMachine, module_name: &str) -> Self {
         let module = ctx.create_module(module_name);
@@ -182,7 +186,7 @@ impl<'ctx> IRGen<'ctx> {
     ) -> GlobalValue<'ctx> {
         let initializer = self.gen_expr_non_void(
             decl.initializer(), 
-            &LocalTracker::empty() // no value needed to be tracked for global vars
+            &LocalTracker::empty() // no local value needed to be tracked for global vars
         );
         let ret = self.gen_global_var_impl(
             decl.name(), 
@@ -269,6 +273,8 @@ impl<'ctx> IRGen<'ctx> {
         &self,
         decl: &FnDecl
     ) -> FunctionValue<'ctx> {
+        // currently all functions are assumed to be fn() i32
+        // TODO: support function with parameters
         let func = self.declare_function(
             decl.name(),
              &self.context.i32_type(), 
@@ -317,6 +323,8 @@ impl<'ctx> IRGen<'ctx> {
         expr: &BinaryExpr,
         tracker: &LocalTracker<'ctx>
     ) -> BasicValueEnum<'ctx> {
+        // requires: both lhs and rhs are i32 type
+
         let lhs = self.gen_expr_non_void(expr.lhs(), tracker);
         let rhs = self.gen_expr_non_void(expr.rhs(), tracker);
         let lhs = match lhs {
@@ -333,27 +341,27 @@ impl<'ctx> IRGen<'ctx> {
         match op {
             BinaryOp::Add => 
                 self.builder.build_int_add(
-                    lhs, rhs, ""
+                    lhs, rhs, "add"
                 ).unwrap().into(),
 
             BinaryOp::Sub => 
                 self.builder.build_int_sub(
-                    lhs, rhs, ""
+                    lhs, rhs, "sub"
                 ).unwrap().into(),
 
             BinaryOp::Mul => 
                 self.builder.build_int_mul(
-                    lhs, rhs, ""
+                    lhs, rhs, "mul"
                 ).unwrap().into(),
 
             BinaryOp::Div => 
                 self.builder.build_int_signed_div(
-                    lhs, rhs, ""
+                    lhs, rhs, "div"
                 ).unwrap().into(),
 
             BinaryOp::Mod =>
                 self.builder.build_int_signed_rem(
-                    lhs, rhs, ""
+                    lhs, rhs, "mod"
                 ).unwrap().into(),
         }
     }
@@ -371,7 +379,7 @@ impl<'ctx> IRGen<'ctx> {
                 let global_str = self.module.add_global(
                     self.context.i8_type().array_type(s.len() as u32 + 1), 
                     None, 
-                    ""
+                    "" // just let LLVM generate a name for us
                 );
                 global_str.set_initializer(&self.context.const_string(s.as_bytes(), true));
                 global_str.as_pointer_value().into()
@@ -410,7 +418,7 @@ impl<'ctx> IRGen<'ctx> {
                         ).unwrap();
                         return loaded.into();
                     },
-                    _ => panic!("expect a pointer value (represents a lvalue) for a rvalue cast")
+                    _ => panic!("expect a pointer value (represents a lvalue) for a rvalue cast"),
                 }
             }
 
@@ -426,7 +434,7 @@ impl<'ctx> IRGen<'ctx> {
                         let _ = self.builder.build_store(v, rhs_value);
                         return v.into();
                     },
-                    _ => panic!("expect a pointer value (represents a lvalue) for an assignment")
+                    _ => panic!("expect a pointer value (represents a lvalue) for an assignment"),
                 }
             }
 
@@ -434,7 +442,7 @@ impl<'ctx> IRGen<'ctx> {
                 return self.gen_binary_expr(binary, tracker);
             }
 
-            _ => self.gen_expr(expr, tracker).unwrap()
+            _ => self.gen_expr(expr, tracker).expect("this expression is assumed to be non-void"),
         }
     }
 
@@ -455,12 +463,14 @@ impl<'ctx> IRGen<'ctx> {
                     arg_values.push(self.gen_expr_non_void(arg, tracker).into());
                 }
 
-                let fn_value = self.module.get_function(callee).unwrap();
+                let fn_value = self.module.get_function(callee)
+                    .expect("frontend should assure this function exists");
+
                 // calling a function can result in void type
                 match self.builder.build_call(fn_value, &arg_values.as_slice(), "")
                     .unwrap().try_as_basic_value() {
                         Either::Left(v) => Some(v),
-                        Either::Right(_) => None
+                        Either::Right(_) => None // the function returns void, TODO: check this
                     }
             }
 

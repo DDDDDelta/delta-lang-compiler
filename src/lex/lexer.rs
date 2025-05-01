@@ -34,6 +34,7 @@ pub struct Lexer<'s> {
     pos: LexState<'s>,
     keyword_matcher: KeywordMatcher,
     eof: bool,
+    errored: bool,
 }
 
 impl<'s> Lexer<'s> {
@@ -43,12 +44,18 @@ impl<'s> Lexer<'s> {
             pos: LexState::new(input, 0),
             keyword_matcher: KeywordMatcher::new(),
             eof: false,
+            errored: false,
         }
+    }
+
+    pub fn ok(&self) -> bool {
+        !self.errored
     }
 
     fn handle_eof(&mut self) -> Option<Token<'s>> {
         if self.eof {
             eprintln!("Unexpected EOF");
+            self.errored = true;
             None
         } 
         else {
@@ -58,66 +65,82 @@ impl<'s> Lexer<'s> {
     }
     
     pub fn lex(&mut self) -> Option<Token<'s>> {
+        if self.errored {
+            return None;
+        }
+
         // we make sure c is the first character of the next token
+        // and pos is pointing to the next character after c
         // skips whitespace until a valid character or return None / EOF if EOF is reach
-        let mut c: char;
+        let mut curr: char;
         let start: LexState<'s>;
         loop {
-            let o = self.pos.get();
-            if o.is_none() {
+            // there is no character available, EOF reached
+            let c = self.pos.get();
+            if c.is_none() {
                 return self.handle_eof();
             }
 
-            c = o.unwrap();
-            if !c.is_whitespace() {
+            curr = c.unwrap();
+            if !curr.is_whitespace() {
                 start = self.pos.pre_inc();
                 break;
             }
+
+            // skips the current whitespace character
+            self.pos.inc();
         }
 
-        match c {
+        match curr {
             '"' => {
                 loop {
-                    if let Some(curr) = self.pos.get_inc() {
-                        if curr == '"' {
+                    // the next character will be consumed anyways
+                    // it is either a closing quote or a part of the string
+                    if let Some(next) = self.pos.get_inc() {
+                        if next == '"' {
                             return Some(start.form_token(&self.pos, TokenKind::STR));
                         }
                     } 
                     else {
-                        return self.handle_eof();
+                        // EOF reached before closing quote, this is an error
+                        eprintln!("unclosed string literal before EOF");
+                        self.errored = true;
+                        return None;
                     }
                 }
             }
 
             '0'..='9' => {
                 loop {
-                    if let Some(curr) = self.pos.get_inc() {
-                        if !curr.is_digit(10) {
-                            return Some(start.form_token(&self.pos, TokenKind::INT));
+                    if let Some(next) = self.pos.get() {
+                        if next.is_digit(10) {
+                            self.pos.inc();
+                            continue;
                         }
-                    } 
-                    else {
-                        return self.handle_eof();
                     }
+
+                    // either the next character is not a digit => end of the number
+                    // or EOF reached, return the last token of the file, this is not an error (lexically)
+                    return Some(start.form_token(&self.pos, TokenKind::INT));
                 }
             }
 
 
             'a'..='z' | 'A'..='Z' | '_' => {
                 loop {
-                    if let Some(curr) = self.pos.get_inc() {
-                        if !curr.is_alphanumeric() && curr != '_' {
-                            
-                            let s = start.form_str(&self.pos);
-                            let kind = self.keyword_matcher.search_str(s)
-                                .unwrap_or(TokenKind::ID);
-                            
-                            return Some(start.form_token(&self.pos, kind));
+                    if let Some(next) = self.pos.get() {
+                        if next.is_alphanumeric() || next == '_' {
+                            self.pos.inc();
+                            continue;
                         }
-                    } 
-                    else {
-                        return self.handle_eof();
                     }
+
+                    // same as above 
+                    let s = start.form_str(&self.pos);
+                    let kind = self.keyword_matcher.search_str(s)
+                        .unwrap_or(TokenKind::ID);
+                    
+                    return Some(start.form_token(&self.pos, kind));
                 }
             }
 
@@ -146,7 +169,8 @@ impl<'s> Lexer<'s> {
             '}' => Some(self.pos.form_token(&start, TokenKind::RCURLY)),
 
             _ => {
-                eprintln!("unrecognized character: {}", c);
+                eprintln!("unrecognized character: {}", curr);
+                self.errored = true;
                 None
             }
         }
@@ -168,7 +192,7 @@ impl<'s> PartialEq for LexState<'s> {
 impl<'s> Eq for LexState<'s> {}
 
 impl<'s> PartialOrd for LexState<'s> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { 
         self.current.partial_cmp(&other.current)
     }
 }
@@ -202,9 +226,7 @@ impl<'s> LexState<'s> {
     fn pre_inc(&mut self) -> Self {
         let pre = self.clone();
 
-        if let Some(c) = self.get() {
-            self.current += c.len_utf8();
-        }
+        self.inc();
 
         pre
     }

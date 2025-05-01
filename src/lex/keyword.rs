@@ -1,4 +1,4 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{ hash_map::Entry, HashMap };
 
 use crate::lex::token::{ TokenKind, KeywordKind };
 
@@ -55,7 +55,7 @@ impl KeywordMatcher {
         let mut curr = &self.start_node;
 
         for c in s.chars() {
-            if let Some(node) = self.start_node.children.get(&c) {
+            if let Some(node) = curr.children.get(&c) {
                 curr = node;
             } 
             else {

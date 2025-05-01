@@ -1,7 +1,7 @@
 use subenum::subenum;
 
 #[subenum(KeywordKind)]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TokenKind {
     #[subenum(KeywordKind)]
     FN,
@@ -45,6 +45,7 @@ impl KeywordKind {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token<'s> {
     kind: TokenKind,
     lexeme: &'s str,
