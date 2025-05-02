@@ -3,27 +3,16 @@
 #![allow(dead_code)]
 
 use cpluspluswocaonima::lex::lexer::Lexer;
+use cpluspluswocaonima::lex::cached_lexer::CachedLexer;
 use cpluspluswocaonima::lex::token::TokenKind::{ self, * };
 use cpluspluswocaonima::lex::token::Token;
-
-/// Collect tokens until the first EOF **or** until the lexer
-/// reports an error (`lex()` returns `None`).
-fn collect(src: &str) -> Vec<Token> {
-    let mut lx = Lexer::new(src);
-    let mut out = Vec::new();
-
-    while let Some(tok) = lx.lex() {
-        out.push(tok.clone());
-        if *tok.kind() == EOF { break; }
-    }
-    out
-}
+use cpluspluswocaonima::lex::lex_all;
 
 /* --- basic lexical categories --- */
 
 #[test]
 fn keywords_and_identifiers() {
-    let got = collect("fn let i32 return foo _bar");
+    let got = lex_all("fn let i32 return foo _bar");
     let exp = vec![
         Token::new(FN,     "fn"),
         Token::new(LET,    "let"),
@@ -38,7 +27,7 @@ fn keywords_and_identifiers() {
 
 #[test]
 fn numeric_and_string_literals() {
-    let got = collect(r#"123 "abc""#);
+    let got = lex_all(r#"123 "abc""#);
     let exp = vec![
         Token::new(INT, "123"),
         Token::new(STR, r#""abc""#),
@@ -49,7 +38,7 @@ fn numeric_and_string_literals() {
 
 #[test]
 fn operators_and_delimiters() {
-    let got = collect("+-*/%=,;(){}");
+    let got = lex_all("+-*/%=,;(){}");
     let exp = vec![
         Token::new(PLUS,   "+"),
         Token::new(MINUS,  "-"),
@@ -70,7 +59,7 @@ fn operators_and_delimiters() {
 
 #[test]
 fn whitespace_is_ignored() {
-    let got = collect(" \t let\nx\t=\r10 ");
+    let got = lex_all(" \t let\nx\t=\r10 ");
     let exp = vec![
         Token::new(LET, "let"),
         Token::new(ID,  "x"),
@@ -103,7 +92,7 @@ fn unknown_character_sets_error() {
 #[test]
 fn empty_string_literal() {
     assert_eq!(
-        collect(r#""""#),
+        lex_all(r#""""#),
         vec![Token::new(STR, r#""""#), Token::new(EOF, "")],
     );
 }
@@ -111,7 +100,7 @@ fn empty_string_literal() {
 #[test]
 fn identifier_with_leading_underscore() {
     assert_eq!(
-        collect("_foo123 99"),
+        lex_all("_foo123 99"),
         vec![
             Token::new(ID,  "_foo123"),
             Token::new(INT, "99"),
@@ -123,7 +112,7 @@ fn identifier_with_leading_underscore() {
 #[test]
 fn consecutive_operators_without_spaces() {
     assert_eq!(
-        collect("a+-*/b"),
+        lex_all("a+-*/b"),
         vec![
             Token::new(ID,   "a"),
             Token::new(PLUS, "+"),
@@ -146,7 +135,7 @@ fn unterminated_string_sets_error() {
 #[test]
 fn leading_zero_and_pseudo_hex() {
     assert_eq!(
-        collect("007 0x10"), // currently do not support hex literals
+        lex_all("007 0x10"), // currently do not support hex literals
         vec![
             Token::new(INT, "007"),
             /* lexer splits “0x10” into INT '0' + ID 'x10' at present */
