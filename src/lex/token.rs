@@ -60,7 +60,7 @@ impl<'s> Token<'s> {
         &self.kind
     }
 
-    pub fn lexeme(&self) -> &str {
+    pub fn lexeme(&self) -> &'s str {
         self.lexeme
     }
 }
