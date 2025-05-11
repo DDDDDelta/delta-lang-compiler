@@ -108,7 +108,7 @@ impl<'s> Parser<'s> {
     }
 
     pub fn parse_all(&mut self) -> Option<Vec<TopLevelDecl>> {
-        let mut tracker = NameTracker::empty();
+        let mut tracker = Scope::empty();
         let mut decls = Vec::new();
         while let Some(tok) = self.lexer.lex() {
             if *tok.kind() == TokenKind::EOF {
@@ -118,10 +118,10 @@ impl<'s> Parser<'s> {
             decls.push(self.parse_top_level_decl(&mut tracker)?);
         }
 
-        None
+        Some(decls)
     }
 
-    fn parse_top_level_decl(&mut self, tracker: &mut NameTracker) -> Option<TopLevelDecl> {
+    pub fn parse_top_level_decl(&mut self, tracker: &mut Scope) -> Option<TopLevelDecl> {
         let tok = self.lexer.peek()?;
         match tok.kind() {
             TokenKind::LET => 
@@ -141,7 +141,7 @@ impl<'s> Parser<'s> {
         }
     }
 
-    fn parse_var_decl(&mut self, top_lv: bool, tracker: &mut NameTracker) -> Option<Rc<VarDecl>> {
+    fn parse_var_decl(&mut self, top_lv: bool, tracker: &mut Scope) -> Option<Rc<VarDecl>> {
         self.expect(TokenKind::LET)?;
         let (name, decl_type) = self.parse_declarator(tracker)?;
         self.expect(TokenKind::EQ)?;
@@ -165,7 +165,7 @@ impl<'s> Parser<'s> {
         }
     }
 
-    pub fn parse_expr(&mut self, tracker: &NameTracker) -> Option<Expr> {
+    pub fn parse_expr(&mut self, tracker: &Scope) -> Option<Expr> {
         let tok = self.lexer.peek()?.clone();
 
         match tok.kind() {
@@ -195,7 +195,7 @@ impl<'s> Parser<'s> {
         }
     }
 
-    fn parse_declarator(&mut self, tracker: &NameTracker) -> Option<(&'s str, Type)> {
+    fn parse_declarator(&mut self, tracker: &Scope) -> Option<(&'s str, Type)> {
         let tok = self.expect(TokenKind::ID)?;
         // TODO: make this properly parse a type
         let decl_type = self.expect(TokenKind::I32)?;
@@ -209,12 +209,12 @@ impl<'s> Parser<'s> {
     }
 }
 
-pub struct NameTracker {
+pub struct Scope {
     pub prev: *const Self,
     pub decls: HashMap<String, NamedDecl>,
 }
 
-impl NameTracker {
+impl Scope {
     pub fn empty() -> Self {
         Self { prev: null(), decls: HashMap::new() }
     }

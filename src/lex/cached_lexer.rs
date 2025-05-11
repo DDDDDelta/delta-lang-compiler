@@ -59,6 +59,10 @@ impl<'s> CachedLexer<'s> {
                 self.cache.push_back(token);
             }
             else {
+                // if we go pass EOF, clear the cache and return None
+                // since the underlying lexer is no longer in a valid state
+                // i.e. self.lexer.ok() == false
+                self.cache.clear();
                 return None;
             }
         }
