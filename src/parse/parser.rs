@@ -1,13 +1,14 @@
 use std::collections::hash_map::Entry;
 use std::rc::Rc;
 use std::collections::HashMap;
-use std::ptr::null;
+use std::ptr::{ null, null_mut };
 
 use crate::lex::cached_lexer::CachedLexer;
 use crate::lex::token::{ Token, TokenKind };
-use crate::ast::decl::{ Decl, FnDecl, Named, NamedDecl, TopLevelDecl, VarDecl };
+use crate::ast::decl::{ Decl, FnDecl, LocalDecl, Named, NamedDecl, TopLevelDecl, VarDecl };
 use crate::ast::expr_type::Type;
 use crate::ast::expr::{ Expr, ValueCategory };
+use crate::ast::stmt::{ Stmt, ReturnStmt };
 
 /* 
  * *** Parser Rule ***
@@ -91,6 +92,15 @@ pub struct Parser<'s> {
     lexer: CachedLexer<'s>,
 }
 
+macro_rules! expr_peek {
+    () => {
+        crate::lex::token::TokenKind::ID | 
+        crate::lex::token::TokenKind::INT | 
+        crate::lex::token::TokenKind::STR | 
+        crate::lex::token::TokenKind::LPAREN
+    };
+}
+
 impl<'s> Parser<'s> {
     pub fn new(lexer: CachedLexer<'s>) -> Self {
         Self { lexer }
@@ -108,27 +118,27 @@ impl<'s> Parser<'s> {
     }
 
     pub fn parse_all(&mut self) -> Option<Vec<TopLevelDecl>> {
-        let mut tracker = Scope::empty();
+        let mut scope = Scope::empty();
         let mut decls = Vec::new();
         while let Some(tok) = self.lexer.lex() {
             if *tok.kind() == TokenKind::EOF {
                 break;
             }
 
-            decls.push(self.parse_top_level_decl(&mut tracker)?);
+            decls.push(self.parse_top_level_decl(&mut scope)?);
         }
 
         Some(decls)
     }
 
-    pub fn parse_top_level_decl(&mut self, tracker: &mut Scope) -> Option<TopLevelDecl> {
+    pub fn parse_top_level_decl(&mut self, scope: &mut Scope) -> Option<TopLevelDecl> {
         let tok = self.lexer.peek()?;
         match tok.kind() {
             TokenKind::LET => 
-                Some(TopLevelDecl::Var(self.parse_var_decl(true, tracker)?)),
+                Some(TopLevelDecl::Var(self.parse_var_decl(true, scope)?)),
 
             TokenKind::FN => 
-                Some(TopLevelDecl::Fn(self.parse_fn_decl()?)),
+                Some(TopLevelDecl::Fn(self.parse_fn_decl(scope)?)),            
 
             _ => None,
         }
@@ -141,11 +151,11 @@ impl<'s> Parser<'s> {
         }
     }
 
-    fn parse_var_decl(&mut self, top_lv: bool, tracker: &mut Scope) -> Option<Rc<VarDecl>> {
+    fn parse_var_decl(&mut self, top_lv: bool, scope: &mut Scope) -> Option<Rc<VarDecl>> {
         self.expect(TokenKind::LET)?;
-        let (name, decl_type) = self.parse_declarator(tracker)?;
+        let (name, decl_type) = self.parse_declarator(scope)?;
         self.expect(TokenKind::EQ)?;
-        let expr = self.parse_expr(tracker)?;
+        let expr = self.parse_expr(scope)?;
         self.expect(TokenKind::SEMI)?;
 
         if top_lv {
@@ -156,7 +166,7 @@ impl<'s> Parser<'s> {
         }
         let decl = Rc::new(VarDecl::new(name.to_string(), expr));
 
-        if tracker.add(&NamedDecl::Var(decl.clone())) {
+        if scope.add(&NamedDecl::Var(decl.clone())) {
             Some(decl)
         }
         else {
@@ -165,7 +175,7 @@ impl<'s> Parser<'s> {
         }
     }
 
-    pub fn parse_expr(&mut self, tracker: &Scope) -> Option<Expr> {
+    pub fn parse_expr(&mut self, scope: &Scope) -> Option<Expr> {
         let tok = self.lexer.peek()?.clone();
 
         match tok.kind() {
@@ -173,7 +183,7 @@ impl<'s> Parser<'s> {
                 self.lexer.lex().unwrap();
                 let id = tok.lexeme();
 
-                if let Some(decl) = tracker.find(id) {
+                if let Some(decl) = scope.find(id) {
                     Some(Expr::DeclRef(decl.into()))
                 }
                 else {
@@ -195,32 +205,176 @@ impl<'s> Parser<'s> {
         }
     }
 
-    fn parse_declarator(&mut self, tracker: &Scope) -> Option<(&'s str, Type)> {
+    fn parse_declarator(&mut self, tracker: &mut Scope) -> Option<(&'s str, Type)> {
         let tok = self.expect(TokenKind::ID)?;
-        // TODO: make this properly parse a type
-        let decl_type = self.expect(TokenKind::I32)?;
+        // TODO: validate the identifier in the current scope
 
-        Some((tok.lexeme(), Type::I32))
+        let ty = self.parse_type()?;
+
+        (tok.lexeme(), ty).into()
     }
 
-    fn parse_fn_decl(&mut self) -> Option<Rc<FnDecl>> {
-        // Implementation of function declaration parsing
-        unimplemented!()
+    // TODO: make this properly parse a type
+    fn parse_type(&mut self) -> Option<Type> {
+        let tok = self.lexer.peek()?;
+        match tok.kind() {
+            TokenKind::I32 => {
+                self.lexer.lex()?;
+                Type::I32.into()
+            }
+
+            _ => None,
+        }
+    }
+
+    fn parse_sequence_of<F, T>(
+        &mut self, parse_action: &F, 
+        delim: TokenKind, scope: &mut Scope
+    ) -> Option<Vec<T>> 
+    where 
+        F: Fn(&mut Self, &mut Scope) -> Option<T>,
+    {
+        let mut list = Vec::new();
+        loop {
+            list.push(parse_action(self, scope)?);
+
+            let d = self.lexer.peek()?;
+            if *d.kind() == delim {
+                self.lexer.lex()?;
+            }
+            else {
+                break;
+            }
+        }
+
+        list.into()
+    }
+
+    fn parse_optional_list_of<F, T>(
+        &mut self, parse_action: &F, delim: TokenKind,
+        start: TokenKind, end: TokenKind, scope: &mut Scope
+    ) -> Option<Vec<T>> 
+    where 
+        F: Fn(&mut Self, &mut Scope) -> Option<T>,
+    {
+        self.expect(start)?;
+        
+        if let Some(tok) = self.lexer.peek() {
+            if *tok.kind() == end {
+                self.lexer.lex()?;
+                return Some(Vec::new());
+            }
+        }
+
+        let ret = self.parse_sequence_of(parse_action, delim, scope)?;
+
+        self.expect(end)?;
+
+        ret.into()
+    }
+
+    pub fn parse_fn_decl(&mut self, s: &mut Scope) -> Option<Rc<FnDecl>> {
+        self.expect(TokenKind::FN)?;
+        let tok = self.expect(TokenKind::ID)?;
+        let name = tok.lexeme();
+
+        if s.find(name).is_some() {
+            eprintln!("Duplicate function declaration: {}", name);
+            return None;
+        }
+
+        let param_action = 
+            |this: &mut Self, scope: &mut Scope| this.parse_declarator(scope); // maybe refactor this
+
+        let mut curr_scope = Scope::new(s); 
+        let param = self.parse_optional_list_of(
+            &param_action, 
+            TokenKind::COMMA, TokenKind::LPAREN, TokenKind::RPAREN,
+            &mut curr_scope
+        )?;
+        // the parameters will be discarded for now
+
+        /*
+         * let ret_ty: Type;
+         * if self.lexer.peek()?.kind() != &TokenKind::LCURLY {
+         *     ret_ty = self.parse_type()?;
+         * }
+         * else {
+         *     ret_ty = Type::I32;
+         * }
+        */
+
+        self.expect(TokenKind::LCURLY)?;
+        let mut body = Vec::new();
+        while let Some(tok) = self.lexer.peek() {
+            if *tok.kind() == TokenKind::RCURLY {
+                break;
+            }
+
+            body.push(self.parse_stmt(&mut curr_scope)?);
+        }
+        // consume the closing curly brace
+        // do not use self.expect here, since if lexer errored, it generates extra error messages
+        self.lexer.lex()?;
+
+        Rc::new(FnDecl::new(name.to_string(), body)).into()
+    }
+
+    pub fn parse_stmt(&mut self, scope: &mut Scope) -> Option<Stmt> {
+        let tok = self.lexer.peek()?;
+        match tok.kind() {
+            TokenKind::LET => {
+                Some(Stmt::LocalDecl(LocalDecl::Var(self.parse_var_decl(false, scope)?)))
+            }
+
+            TokenKind::RETURN => {
+                self.lexer.lex()?;
+                match self.lexer.peek()?.kind() {
+                    expr_peek!() => {
+                        let expr = self.parse_expr(scope)?;
+                        self.expect(TokenKind::SEMI)?;
+                        Some(Stmt::Return(ReturnStmt::new(expr.into()).into()))
+                    }
+
+                    TokenKind::SEMI => {
+                        self.lexer.lex()?;
+                        Some(Stmt::Return(ReturnStmt::new(None).into()))
+                    }
+
+                    _ => {
+                        eprintln!("unexpected token {:?} after return", self.lexer.lex()?);
+                        None
+                    }
+                }
+            }
+
+            expr_peek!() => {
+                let expr = self.parse_expr(scope)?;
+                self.expect(TokenKind::SEMI)?;
+                Some(Stmt::Expr(expr))
+            }
+
+            _ => {
+                eprintln!("unexpected token {:?}", self.lexer.lex()?);
+                None
+            }
+        }
     }
 }
 
+#[derive(Clone)]
 pub struct Scope {
-    pub prev: *const Self,
-    pub decls: HashMap<String, NamedDecl>,
+    prev: *mut Self,
+    decls: HashMap<String, NamedDecl>,
 }
 
 impl Scope {
     pub fn empty() -> Self {
-        Self { prev: null(), decls: HashMap::new() }
+        Self { prev: null_mut(), decls: HashMap::new() }
     }
 
-    pub fn new(prev: &Self) -> Self {
-        Self { prev: prev as *const Self, decls: HashMap::new() }
+    pub fn new(prev: &mut Self) -> Self {
+        Self { prev: prev as *mut Self, decls: HashMap::new() }
     }
 
     pub fn add(&mut self, decl: &NamedDecl) -> bool {
@@ -232,13 +386,42 @@ impl Scope {
         res
     }
 
-    pub fn find(&self, name: &str) -> Option<NamedDecl> {
+    pub fn find_local(&self, name: &str) -> Option<NamedDecl> {
         if let Some(d) = self.decls.get(name) {
             return Some(d.clone());
         }
+        None
+    }
 
-        if self.prev != null() {
+    pub fn find_local_mut(&mut self, name: &str) -> Option<&mut NamedDecl> {
+        if let Some(d) = self.decls.get_mut(name) {
+            return Some(d);
+        }
+        None
+    }
+
+    pub fn find(&self, name: &str) -> Option<NamedDecl> {
+        if let Some(d) = self.find_local(name) {
+            return Some(d.clone());
+        }
+
+        if self.prev != null_mut() {
             unsafe { &*self.prev } .find(name)
+        }
+        else {
+            None
+        }
+    }
+
+    pub fn find_mut(&mut self, name: &str) -> Option<&mut NamedDecl> {
+        let new = self.clone();
+        
+        if let Some(d) = self.find_local_mut(name) {
+            return Some(d);
+        }
+
+        if new.prev != null_mut() {
+            unsafe { &mut *(new.prev as *mut Self) } .find_mut(name)
         }
         else {
             None
