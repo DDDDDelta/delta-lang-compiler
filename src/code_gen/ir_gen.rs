@@ -1,3 +1,4 @@
+use core::panic;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Binary;
@@ -11,7 +12,7 @@ use inkwell::context::Context;
 use inkwell::data_layout::DataLayout;
 use inkwell::module::{ Linkage, Module };
 use inkwell::targets::TargetMachine;
-use inkwell::types::{ BasicMetadataTypeEnum, BasicType, BasicTypeEnum, IntType };
+use inkwell::types::{ AnyTypeEnum, BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType, IntType };
 use inkwell::values::{ 
     AnyValue, BasicMetadataValueEnum, BasicValue, BasicValueEnum, 
     FunctionValue, GlobalValue, InstructionValue, IntValue, PointerValue 
@@ -19,6 +20,7 @@ use inkwell::values::{
 use inkwell::AddressSpace;
 
 use crate::ast::decl::{ Decl, FnDecl, LocalDecl, Named, TopLevelDecl, VarDecl };
+use crate::ast::expr_type::{FnType, Type};
 use crate::ast::stmt::{ Stmt, ReturnStmt };
 use crate::ast::expr::{ BinaryExpr, BinaryOp, Expr };
 
@@ -29,6 +31,7 @@ pub struct IRGen<'ctx> {
     globals: GlobalTracker<'ctx>,
 }
 
+#[derive(Debug)]
 struct GlobalTracker<'ctx> {
     // TODO: refactor this bs, maybe make all IRGen methods mut
     pub globals: RefCell<Vec<(Decl, GlobalValue<'ctx>)>>,
@@ -81,9 +84,10 @@ impl<'ctx> GlobalTracker<'ctx> {
 }
 
 // tree structure for value tracking, must insure prev lives loneger than self
+#[derive(Debug)]
 pub struct LocalTracker<'ctx> {
     pub prev: *const LocalTracker<'ctx>,
-    pub vars: Vec<(LocalDecl, PointerValue<'ctx>)>,
+    pub vars: Vec<(Decl, PointerValue<'ctx>)>,
 }
 
 impl<'ctx> LocalTracker<'ctx> {
@@ -95,13 +99,13 @@ impl<'ctx> LocalTracker<'ctx> {
         LocalTracker { prev, vars: Vec::new() }
     }
 
-    pub fn add(&mut self, decl: LocalDecl, value: PointerValue<'ctx>) {
+    pub fn add(&mut self, decl: Decl, value: PointerValue<'ctx>) {
         self.vars.push((decl, value));
     }
 
-    pub fn get(&self, decl: &LocalDecl) -> Option<PointerValue<'ctx>> {
+    pub fn get(&self, decl: &Decl) -> Option<PointerValue<'ctx>> {
         for (d, v) in &self.vars {
-            if LocalDecl::ptr_eq(d, decl) {
+            if Decl::ptr_eq(d, decl) {
                 return Some(*v);
             }
         }
@@ -138,6 +142,29 @@ impl<'ctx> IRGen<'ctx> {
 
     pub fn builder(&self) -> &Builder<'ctx> {
         &self.builder
+    }
+
+    pub fn map_to_llvm_type(
+        &self, 
+        ty: &Type
+    ) -> AnyTypeEnum<'ctx> {
+        match ty {
+            Type::I32 => self.context.i32_type().into(),
+            Type::Fn(fnty) => {
+                let ret_type: BasicTypeEnum = self.map_to_llvm_type(fnty.ret_ty()).try_into()
+                    .expect("function return type must be a basic type");
+
+                let param_types = fnty.param_ty().iter()
+                    .map(
+                        |p| 
+                            self.map_to_llvm_type(p).try_into()
+                                .expect("function parameter type must be a basic metadata type")
+                    )
+                    .collect::<Vec<_>>();
+
+                ret_type.fn_type(param_types.as_slice(), false).into()
+            }
+        }
     }
 
     fn setup_builtin_decls(&self) {
@@ -237,6 +264,15 @@ impl<'ctx> IRGen<'ctx> {
         self.module.add_function(name, fn_type, Some(Linkage::External))
     }
 
+    fn declare_with_fn_type(
+        &self, 
+        name: &str, 
+        fn_ty: FunctionType<'ctx>,
+        is_var_arg: bool
+    ) -> FunctionValue<'ctx> {
+        self.module.add_function(name, fn_ty, Some(Linkage::External))
+    }
+
     pub fn gen_local_decl(
         &self,
         decl: &LocalDecl,
@@ -244,7 +280,7 @@ impl<'ctx> IRGen<'ctx> {
     ) {
         match decl {
             LocalDecl::Var(var_decl) => {
-                self.gen_var(var_decl, decl.clone(), tracker);
+                self.gen_var(var_decl, var_decl.clone(), tracker);
             }
         }
     }
@@ -252,16 +288,18 @@ impl<'ctx> IRGen<'ctx> {
     pub fn gen_var(
         &self,
         decl: &VarDecl,
-        decl_enum: LocalDecl,
+        decl_enum: Rc<VarDecl>,
         tracker: &mut LocalTracker<'ctx>
     ) -> PointerValue<'ctx> {
-        let alloca = self.builder.build_alloca(
-            self.context.i32_type(), 
-            decl.name()
-        )
-        .unwrap();
+        let alloca = self.gen_alloca_store(
+            // vardecl must declare a basic type
+            self.map_to_llvm_type(decl.ty()).try_into().unwrap(),
+            decl.name(),
+            // initializer must be a non-void expression
+            self.gen_expr_non_void(decl.initializer(), tracker)
+        );
 
-        tracker.add(decl_enum, alloca);
+        tracker.add(Decl::Var(decl_enum), alloca);
 
         let initializer = self.gen_expr_non_void(decl.initializer(), tracker);
         let _ = self.builder.build_store(alloca, initializer);
@@ -269,16 +307,33 @@ impl<'ctx> IRGen<'ctx> {
         alloca
     }
 
+    pub fn gen_alloca_store(
+        &self,
+        decl: BasicTypeEnum<'ctx>,
+        name: &str,
+        value: BasicValueEnum<'ctx>,
+    ) -> PointerValue<'ctx> {
+        let alloca = self.builder.build_alloca(
+            decl, 
+            name
+        ).unwrap();
+
+        self.builder.build_store(alloca, value).unwrap();
+        alloca
+    }
+
     pub fn gen_function(
         &self,
         decl: &FnDecl
     ) -> FunctionValue<'ctx> {
-        // currently all functions are assumed to be fn() i32
-        // TODO: support function with parameters
-        let func = self.declare_function(
+        let fn_ty = self.map_to_llvm_type(
+            &Type::Fn(Box::new(decl.ty().clone()))
+        ).into_function_type();
+
+        // TODO: support vararg functions
+        let func = self.declare_with_fn_type(
             decl.name(),
-             &self.context.i32_type(), 
-            &[],
+            fn_ty,
             false
         );
 
@@ -287,7 +342,21 @@ impl<'ctx> IRGen<'ctx> {
         let entry = self.context.append_basic_block(func, "entry");
         self.builder.position_at_end(entry);
 
-        for stmt in decl.body() {
+        for (i, param) in func.get_params().iter().enumerate() {
+            let astdecl = &decl.params()[i];
+            param.set_name(astdecl.name());
+            
+            tracker.add(
+                Decl::Param(astdecl.clone()), 
+                self.gen_alloca_store(
+                    param.get_type(), 
+                    astdecl.name(), 
+                    param.clone()
+                )
+            );
+        }
+
+        for stmt in decl.body().as_ref().unwrap() {
             self.gen_stmt(stmt, &mut tracker);
         }
 
@@ -379,7 +448,7 @@ impl<'ctx> IRGen<'ctx> {
                 let global_str = self.module.add_global(
                     self.context.i8_type().array_type(s.len() as u32 + 1), 
                     None, 
-                    "" // just let LLVM generate a name for us
+                    "string_literal"
                 );
                 global_str.set_initializer(&self.context.const_string(s.as_bytes(), true));
                 global_str.as_pointer_value().into()
@@ -390,7 +459,7 @@ impl<'ctx> IRGen<'ctx> {
                 match decl {
                     // reference on vardecl is a lvalue represented as a pointer
                     Decl::Var(var_decl) => {
-                        if let Some(value) = tracker.get(&LocalDecl::Var(var_decl.clone())) {
+                        if let Some(value) = tracker.get(&Decl::Var(var_decl.clone())) {
                             return value.into();
                         }
                         else if let Some(value) = self.globals.get_global_var(decl) { 
@@ -400,6 +469,16 @@ impl<'ctx> IRGen<'ctx> {
                             panic!("variable `{}` not found", var_decl.name());
                         }
                     }
+
+                    Decl::Param(param_decl) => {
+                        if let Some(value) = tracker.get(&Decl::Param(param_decl.clone())) {
+                            return value.into();
+                        }
+                        else {
+                            panic!("parameter `{}` not found", param_decl.name());
+                        }
+                    }
+                    
                     Decl::Fn(_) => panic!("function reference not supported")
                 }
             }

@@ -15,6 +15,8 @@ use inkwell::targets::{ Target, TargetMachine, InitializationConfig, TargetTripl
 use inkwell::values::{ BasicValueEnum, FunctionValue, InstructionValue, PointerValue };
 use inkwell::{ AddressSpace, OptimizationLevel };
 
+use crate::ast::decl::{ Declarator, ParamDecl };
+use crate::ast::expr_type::{ Type, FnType };
 use crate::ast::decl::{ Decl, LocalDecl, TopLevelDecl, VarDecl, FnDecl };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
 use crate::ast::expr::{ Expr, CallExpr, AssignExpr, BinaryExpr, BinaryOp, RValueCastExpr };
@@ -34,17 +36,17 @@ fn main() {
 
     // ast
     let localvardecl = Decl::Var(Rc::new(VarDecl::new(
-        "local".to_string(),
+        Declarator { name: "local".to_string(), ty: Type::I32 },
         Expr::Int(15)
     )));
 
     let globalvardecl = Decl::Var(Rc::new(VarDecl::new(
-        "global".to_string(),
+        Declarator { name: "global".to_string(), ty: Type::I32 },
         Expr::Int(20)
     )));
 
     let localvardecl2 = Decl::Var(Rc::new(VarDecl::new(
-        "local2".to_string(),
+        Declarator::new("local2".to_string(), Type::I32),
         Expr::Int(25)
     )));
 
@@ -115,23 +117,36 @@ fn main() {
             )
         )
     ];
-    let fn_decl = FnDecl::new(
-        "main".to_string(), 
+    let fn_decl = FnDecl::new_with_body(
+        Declarator::new(
+            "main".to_string(), 
+            Type::Fn(Box::new(FnType::new(
+                vec![], Type::I32
+            )))
+        ),
+        vec![],
         stmt_list
     );
 
     let vardecl = VarDecl::new(
-        "v1".to_string(),
+        Declarator::new("v1".to_string(), Type::I32),
         Expr::Int(15)
     );
 
     let localvardecl = VarDecl::new(
-        "v2".to_string(),
+        Declarator::new("v2".to_string(), Type::I32),
         Expr::Int(20)
     );
 
-    let local_fn_decl = FnDecl::new(
-        "local_var".to_string(), 
+    let local_fn_decl = FnDecl::new_with_body(
+        Declarator::new(
+            "local_var".to_string(), 
+            Type::Fn(Box::new(FnType::new(
+                vec![], 
+                Type::I32
+            )))
+        ),
+        vec![],
         vec![
             Stmt::LocalDecl(
                 LocalDecl::Var(Rc::new(localvardecl))
@@ -148,11 +163,49 @@ fn main() {
         ]
     );
 
+    let x_param = Rc::new(
+        ParamDecl::new(
+            Declarator::new("x".to_string(), Type::I32)
+        )
+    );
+
+    let y_param = Rc::new(
+        ParamDecl::new(
+            Declarator::new("y".to_string(), Type::I32)
+        )
+    );
+
+    let param_fn_decl = FnDecl::new_with_body(
+        Declarator::new(
+            "params".to_string(), 
+            Type::Fn(Box::new(FnType::new(
+                vec![Type::I32, Type::I32], 
+                Type::I32
+            )))
+        ),
+        vec![x_param.clone(), y_param.clone()],
+        vec![
+            Stmt::Return(
+                Box::new(
+                    ReturnStmt::new(
+                        Expr::Binary(Box::new(BinaryExpr::new(
+                            BinaryOp::Add,
+                            Expr::RValueCast(Box::new(RValueCastExpr::new(Expr::DeclRef(Decl::Param(x_param))))),
+                            Expr::RValueCast(Box::new(RValueCastExpr::new(Expr::DeclRef(Decl::Param(y_param)))))
+                        ))).into()
+                    )
+                )
+            )
+        ]
+    );
+
+
     let program: Vec<TopLevelDecl> = vec![
         globalvardecl.try_into().unwrap(),
         TopLevelDecl::Fn(Rc::new(fn_decl)),
         TopLevelDecl::Fn(Rc::new(local_fn_decl)),
-        TopLevelDecl::Var(Rc::new(vardecl))
+        TopLevelDecl::Var(Rc::new(vardecl)),
+        TopLevelDecl::Fn(Rc::new(param_fn_decl)),
     ];
 
     // code gen init

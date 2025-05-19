@@ -5,8 +5,8 @@ use std::ptr::{ null, null_mut };
 
 use crate::lex::cached_lexer::CachedLexer;
 use crate::lex::token::{ Token, TokenKind };
-use crate::ast::decl::{ Decl, FnDecl, LocalDecl, Named, NamedDecl, TopLevelDecl, VarDecl };
-use crate::ast::expr_type::Type;
+use crate::ast::decl::{ Decl, Declarator, FnDecl, LocalDecl, Named, NamedDecl, ParamDecl, TopLevelDecl, VarDecl };
+use crate::ast::expr_type::{FnType, Type};
 use crate::ast::expr::{ Expr, ValueCategory };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
 
@@ -140,7 +140,10 @@ impl<'s> Parser<'s> {
             TokenKind::FN => 
                 Some(TopLevelDecl::Fn(self.parse_fn_decl(scope)?)),            
 
-            _ => None,
+            _ => {
+                eprintln!("Unexpected token {:?} when parsing top-level declaration", tok); 
+                None 
+            }
         }
     }
 
@@ -153,7 +156,7 @@ impl<'s> Parser<'s> {
 
     fn parse_var_decl(&mut self, top_lv: bool, scope: &mut Scope) -> Option<Rc<VarDecl>> {
         self.expect(TokenKind::LET)?;
-        let (name, decl_type) = self.parse_declarator(scope)?;
+        let declarator = self.parse_declarator(scope)?;
         self.expect(TokenKind::EQ)?;
         let expr = self.parse_expr(scope)?;
         self.expect(TokenKind::SEMI)?;
@@ -164,13 +167,13 @@ impl<'s> Parser<'s> {
                 return None;
             }
         }
-        let decl = Rc::new(VarDecl::new(name.to_string(), expr));
+        let decl = Rc::new(VarDecl::new(declarator.clone(), expr));
 
         if scope.add(&NamedDecl::Var(decl.clone())) {
             Some(decl)
         }
         else {
-            eprintln!("Duplicate variable declaration: {}", name);
+            eprintln!("Duplicate variable declaration: {}", declarator.name);
             None
         }
     }
@@ -187,6 +190,7 @@ impl<'s> Parser<'s> {
                     Some(Expr::DeclRef(decl.into()))
                 }
                 else {
+                    eprintln!("Unable to resolve reference to: {}", id);
                     None
                 }
             }
@@ -201,17 +205,20 @@ impl<'s> Parser<'s> {
                 Some(Expr::Str(str_lit.lexeme().to_string()))
             }
 
-            _ => None,
+            _ => {
+                eprintln!("Unexpected token {:?} when parsing expression", tok);
+                None
+            }
         }
     }
 
-    fn parse_declarator(&mut self, tracker: &mut Scope) -> Option<(&'s str, Type)> {
+    fn parse_declarator(&mut self, tracker: &mut Scope) -> Option<Declarator> {
         let tok = self.expect(TokenKind::ID)?;
         // TODO: validate the identifier in the current scope
 
         let ty = self.parse_type()?;
 
-        (tok.lexeme(), ty).into()
+        Declarator::new(tok.lexeme().to_string(), ty.clone()).into()
     }
 
     // TODO: make this properly parse a type
@@ -223,11 +230,14 @@ impl<'s> Parser<'s> {
                 Type::I32.into()
             }
 
-            _ => None,
+            _ => { 
+                eprintln!("Unexpected token {:?} when parsing type", tok);
+                None
+            }
         }
     }
 
-    fn parse_sequence_of<F, T>(
+    fn parse_list_of<F, T>(
         &mut self, parse_action: &F, 
         delim: TokenKind, scope: &mut Scope
     ) -> Option<Vec<T>> 
@@ -266,7 +276,7 @@ impl<'s> Parser<'s> {
             }
         }
 
-        let ret = self.parse_sequence_of(parse_action, delim, scope)?;
+        let ret = self.parse_list_of(parse_action, delim, scope)?;
 
         self.expect(end)?;
 
@@ -284,25 +294,55 @@ impl<'s> Parser<'s> {
         }
 
         let param_action = 
-            |this: &mut Self, scope: &mut Scope| this.parse_declarator(scope); // maybe refactor this
+            |this: &mut Self, scope: &mut Scope| { this.parse_declarator(scope) }; // maybe refactor this
 
         let mut curr_scope = Scope::new(s); 
-        let param = self.parse_optional_list_of(
+
+        let params = self.parse_optional_list_of(
             &param_action, 
             TokenKind::COMMA, TokenKind::LPAREN, TokenKind::RPAREN,
             &mut curr_scope
         )?;
-        // the parameters will be discarded for now
 
-        /*
-         * let ret_ty: Type;
-         * if self.lexer.peek()?.kind() != &TokenKind::LCURLY {
-         *     ret_ty = self.parse_type()?;
-         * }
-         * else {
-         *     ret_ty = Type::I32;
-         * }
-        */
+        let ret_ty: Type;
+        if self.lexer.peek()?.kind() != &TokenKind::LCURLY {
+            ret_ty = self.parse_type()?;
+        }
+        else {
+            ret_ty = Type::I32;
+        }
+
+        let mut param_decls: Vec<Rc<ParamDecl>> = Vec::new();
+        for param in &params {
+            if param.name == name {
+                eprintln!("Function parameter cannot have the same name as the function");
+                return None;
+            }
+
+            if curr_scope.find_local(&param.name).is_none() {
+                let decl = Rc::new(ParamDecl::new(param.clone()));
+
+                param_decls.push(decl.clone());
+                curr_scope.add(&NamedDecl::Param(decl.clone()));
+            }
+            else {
+                eprintln!("Duplicate parameter declaration: {}", param.name);
+                return None;
+            }
+        }
+
+        print!("{:?}", param_decls);
+
+        let mut fn_decl = FnDecl::new(
+            Declarator { 
+                name: name.to_string(), 
+                ty: Type::Fn(Box::new(FnType::new(
+                    params.into_iter().map(|d| d.ty).collect(), 
+                    ret_ty.clone()
+                ))) 
+            },
+            param_decls
+        );
 
         self.expect(TokenKind::LCURLY)?;
         let mut body = Vec::new();
@@ -311,13 +351,30 @@ impl<'s> Parser<'s> {
                 break;
             }
 
-            body.push(self.parse_stmt(&mut curr_scope)?);
+            let stmt = self.parse_stmt(&mut curr_scope)?;
+            if let Stmt::Return(ret) = &stmt {
+                let actual_ret: Type;
+                if let Some(expr) = ret.returned() {
+                    actual_ret = expr.ty();
+                }
+                else {
+                    actual_ret = Type::I32;
+                }
+
+                if actual_ret != ret_ty {
+                    eprintln!("Function {} has inconsistent return type", fn_decl.name());
+                    return None;
+                }
+            }
+
+            body.push(stmt);
         }
         // consume the closing curly brace
         // do not use self.expect here, since if lexer errored, it generates extra error messages
         self.lexer.lex()?;
 
-        Rc::new(FnDecl::new(name.to_string(), body)).into()
+        *fn_decl.body_mut() = Some(body);
+        Rc::new(fn_decl).into()
     }
 
     pub fn parse_stmt(&mut self, scope: &mut Scope) -> Option<Stmt> {

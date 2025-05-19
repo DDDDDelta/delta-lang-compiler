@@ -1,7 +1,9 @@
 use std::rc::Rc;
 
 use crate::ast::decl::Decl;
+use crate::ast::expr_type::Type;
 
+#[derive(Debug)]
 pub enum Expr {
     Int(i32),
     Str(String),
@@ -30,6 +32,24 @@ impl Expr {
     pub fn is_rvalue(&self) -> bool {
         self.value_category().is_rvalue()
     }
+
+    pub fn ty(&self) -> Type {
+        match self {
+            Expr::Int(_) => Type::I32,
+            Expr::Str(_) => Type::I32,
+            Expr::Call(call) => Type::I32, // Placeholder, should be the return type of the function
+            Expr::RValueCast(_) => Type::I32,
+            Expr::DeclRef(decl) => {
+                match decl {
+                    Decl::Var(var_decl) => var_decl.ty().clone(),
+                    Decl::Fn(fn_decl) => Type::Fn(Box::new(fn_decl.ty().clone())),
+                    Decl::Param(param_decl) => param_decl.ty().clone(),
+                }
+            }
+            Expr::Assign(_) => Type::I32,
+            Expr::Binary(_) => Type::I32,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -48,6 +68,7 @@ impl ValueCategory {
     }
 }
 
+#[derive(Debug)]
 pub struct RValueCastExpr {
     operand: Expr,
 }
@@ -67,6 +88,7 @@ impl RValueCastExpr {
     }
 }
 
+#[derive(Debug)]
 pub struct CallExpr {
     callee: String,
     args: Vec<Expr>,
@@ -91,6 +113,7 @@ impl CallExpr {
     }
 }
 
+#[derive(Debug)]
 pub struct AssignExpr {
     exprs: [Expr; 2],
 }
@@ -119,6 +142,7 @@ impl AssignExpr {
     }
 }
 
+#[derive(Debug)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -127,6 +151,7 @@ pub enum BinaryOp {
     Mod,
 }
 
+#[derive(Debug)]
 pub struct BinaryExpr {
     op: BinaryOp,
     exprs: [Expr; 2],

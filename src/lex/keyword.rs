@@ -63,6 +63,6 @@ impl KeywordMatcher {
             }
         }
 
-        return curr.kind.clone();
+        curr.kind.clone()
     }
 }

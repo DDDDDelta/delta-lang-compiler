@@ -2,12 +2,14 @@ use crate::ast::expr::Expr;
 use crate::ast::decl::LocalDecl;
 
 // consider this a union of smart pointers
+#[derive(Debug)]
 pub enum Stmt {
     Expr(Expr),
     Return(Box<ReturnStmt>),
     LocalDecl(LocalDecl),
 }
 
+#[derive(Debug)]
 pub struct ReturnStmt {
     returned: Option<Expr>,
 }

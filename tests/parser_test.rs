@@ -4,12 +4,13 @@
 use std::rc::Rc;
 
 use cpluspluswocaonima::ast::expr::Expr;
+use cpluspluswocaonima::ast::expr_type::Type;
 use cpluspluswocaonima::ast::stmt::{ Stmt, ReturnStmt };
 use cpluspluswocaonima::parse::parser::{ Parser, Scope };
 use cpluspluswocaonima::lex::cached_lexer::CachedLexer;
 use cpluspluswocaonima::lex::lexer::Lexer;
 use cpluspluswocaonima::lex::token::{ Token, TokenKind };
-use cpluspluswocaonima::ast::decl::{ Named, NamedDecl, TopLevelDecl, VarDecl, LocalDecl };
+use cpluspluswocaonima::ast::decl::{ Declarator, LocalDecl, Named, NamedDecl, TopLevelDecl, VarDecl };
 
 #[test]
 fn parse_integer_literal_expr() {
@@ -28,7 +29,10 @@ fn parse_integer_literal_expr() {
 fn identifier_resolves_to_decl() {
     // put `a` in scope first
     let mut scope = Scope::empty();
-    scope.add(&NamedDecl::Var(Rc::new(VarDecl::new("a".into(), Expr::Int(0)))));
+    scope.add(&NamedDecl::Var(Rc::new(VarDecl::new(
+        Declarator::new("a".to_string(), Type::I32), 
+        Expr::Int(0)
+    ))));
 
     let lexer = CachedLexer::new("a");
     let mut parser = Parser::new(lexer);
@@ -87,8 +91,12 @@ fn top_level_non_const_init_rejected() {
 #[test]
 fn name_tracker_detects_duplicates() {
     let mut nt = Scope::empty();
-    let v1 = NamedDecl::Var(Rc::new(VarDecl::new("x".into(), Expr::Int(1))));
-    let v2 = NamedDecl::Var(Rc::new(VarDecl::new("x".into(), Expr::Int(2))));
+    let v1 = NamedDecl::Var(Rc::new(VarDecl::new(
+        Declarator::new("x".to_string(), Type::I32), Expr::Int(1)
+    )));
+    let v2 = NamedDecl::Var(Rc::new(VarDecl::new(
+        Declarator::new("x".to_string(), Type::I32), Expr::Int(2)
+    )));
 
     assert!(nt.add(&v1));   // first insert succeeds
     assert!(!nt.add(&v2));  // duplicate rejected
@@ -107,7 +115,8 @@ fn parse_function_declaration_basic() {
         .expect("function declaration should parse");
 
     assert_eq!(func.name(), "my_function");
-    assert_eq!(func.body().len(), 2); // the two statements: var declaration and return statement
+    assert_eq!(func.body().as_ref().expect("the function has a body").len(), 2); 
+    // the two statements: var declaration and return statement
 }
 
 #[test]
@@ -122,13 +131,12 @@ fn parse_function_declaration_empty_body() {
         .expect("function declaration should parse");
 
     assert_eq!(func.name(), "my_empty_function");
-    assert_eq!(func.body().len(), 0); // no statements inside
+    assert_eq!(func.body().as_ref().expect("the function has a body").len(), 0); // no statements inside
 }
 
 #[test]
-#[ignore = "reason: not implemented parameter declref yet"]
 fn parse_function_declaration_with_multiple_params() {
-    let src = "fn add(x i32, y i32) { return x + y; }";
+    let src = "fn add(x i32, y i32) { y; return x; }";
     let lexer = CachedLexer::new(src);
     let mut parser = Parser::new(lexer);
     let mut scope = Scope::empty();
@@ -138,7 +146,7 @@ fn parse_function_declaration_with_multiple_params() {
         .expect("function declaration with parameters should parse");
 
     assert_eq!(func.name(), "add");
-    assert_eq!(func.body().len(), 1); // one statement: return
+    assert_eq!(func.body().as_ref().expect("the function has a body").len(), 2); // two statement: y and return
 }
 
 #[test]
@@ -178,7 +186,7 @@ fn parse_function_with_no_return_stmt() {
         .expect("function without return statement should parse");
 
     assert_eq!(func.name(), "no_return");
-    assert_eq!(func.body().len(), 1); // only a variable declaration
+    assert_eq!(func.body().as_ref().expect("the function has a body").len(), 1); // only a variable declaration
 }
 
 #[test]
