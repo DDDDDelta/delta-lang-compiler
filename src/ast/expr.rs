@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use crate::ast::decl::Decl;
 use crate::ast::expr_type::Type;
+use crate::lex::token::TokenKind;
 
 #[derive(Debug)]
 pub enum Expr {
@@ -142,7 +143,7 @@ impl AssignExpr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum BinaryOp {
     Add,
     Sub,

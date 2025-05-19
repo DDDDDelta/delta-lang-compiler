@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use cpluspluswocaonima::ast::expr::Expr;
+use cpluspluswocaonima::ast::expr::{BinaryOp, Expr};
 use cpluspluswocaonima::ast::expr_type::Type;
 use cpluspluswocaonima::ast::stmt::{ Stmt, ReturnStmt };
 use cpluspluswocaonima::parse::parser::{ Parser, Scope };
@@ -260,4 +260,92 @@ fn parse_return_stmt_without_expression() {
         }
         _ => panic!("expected ReturnStmt"),
     }
+}
+
+#[test]
+fn binary_precedence_multiplication_bind_tighter_than_addition() {
+    // `1 + 2 * 3` ⇒ ADD(1, MUL(2, 3))
+    let lexer = CachedLexer::new("1 + 2 * 3");
+    let mut parser = Parser::new(lexer);
+    let scope = Scope::empty();
+    let expr = parser.parse_expr(&scope).expect("expression should parse");
+
+    match expr {
+        Expr::Binary(add) => {
+            assert!(matches!(add.op(), BinaryOp::Add));
+            assert!(matches!(add.lhs(), Expr::Int(1)));
+            match add.rhs() {
+                Expr::Binary(mul) => {
+                    assert!(matches!(mul.op(), BinaryOp::Mul));
+                    assert!(matches!(&*mul.lhs(), Expr::Int(2)));
+                    assert!(matches!(&*mul.rhs(), Expr::Int(3)));
+                }
+                _ => panic!("right-hand side of add must be a multiplication")
+            }
+        }
+        _ => panic!("root must be an addition binary-expr"),
+    }
+}
+
+#[test]
+fn binary_left_associative_for_same_precedence_ops() {
+    // `4 - 3 - 2` ⇒ SUB(SUB(4,3), 2)
+    let lexer = CachedLexer::new("4 - 3 - 2");
+    let mut parser = Parser::new(lexer);
+    let scope = Scope::empty();
+    let expr = parser.parse_expr(&scope).expect("expression should parse");
+
+    match expr {
+        Expr::Binary(outer_sub) => {
+            assert!(matches!(outer_sub.op(), BinaryOp::Sub));
+            assert!(matches!(outer_sub.rhs(), Expr::Int(2)));
+            match outer_sub.lhs() {
+                Expr::Binary(inner_sub) => {
+                    assert!(matches!(inner_sub.op(), BinaryOp::Sub));
+                    assert!(matches!(&*inner_sub.lhs(), Expr::Int(4)));
+                    assert!(matches!(&*inner_sub.rhs(), Expr::Int(3)));
+                }
+                _ => panic!("left-hand side of outer subtraction must be another subtraction")
+            }
+        }
+        _ => panic!("root must be a subtraction binary-expr"),
+    }
+}
+
+#[test]
+fn binary_parentheses_override_precedence() {
+    // `(1 + 2) * 3` ⇒ MUL(ADD(1,2),3)
+    let lexer = CachedLexer::new("(1 + 2) * 3");
+    let mut parser = Parser::new(lexer);
+    let scope = Scope::empty();
+    let expr = parser.parse_expr(&scope).expect("expression should parse");
+
+    match expr {
+        Expr::Binary(mul) => {
+            assert!(matches!(mul.op(), BinaryOp::Mul));
+            assert!(matches!(mul.rhs(), Expr::Int(3)));
+            match mul.lhs() {
+                Expr::Binary(add) => {
+                    assert!(matches!(add.op(), BinaryOp::Add));
+                    assert!(matches!(&*add.lhs(), Expr::Int(1)));
+                    assert!(matches!(&*add.rhs(), Expr::Int(2)));
+                }
+                _ => panic!("left-hand side of multiplication must be an addition")
+            }
+        }
+        _ => panic!("root must be a multiplication binary-expr"),
+    }
+}
+
+#[test]
+fn function_with_explicit_return_type_parses() {
+    let src = "fn inc(x i32) i32 { return x + 1; }";
+    let lexer = CachedLexer::new(src);
+    let mut parser = Parser::new(lexer);
+    let mut scope = Scope::empty();
+
+    let func = parser.parse_fn_decl(&mut scope).expect("function should parse");
+    assert_eq!(func.name(), "inc");
+    // body has one return statement
+    assert_eq!(func.body().as_ref().unwrap().len(), 1);
 }

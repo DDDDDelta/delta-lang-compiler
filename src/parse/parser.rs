@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use std::ptr::{ null, null_mut };
 
 use crate::lex::cached_lexer::CachedLexer;
-use crate::lex::token::{ Token, TokenKind };
+use crate::lex::token::{ BinaryOpKind, Token, TokenKind };
 use crate::ast::decl::{ Decl, Declarator, FnDecl, LocalDecl, Named, NamedDecl, ParamDecl, TopLevelDecl, VarDecl };
 use crate::ast::expr_type::{FnType, Type};
-use crate::ast::expr::{ Expr, ValueCategory };
+use crate::ast::expr::{ AssignExpr, BinaryExpr, BinaryOp, Expr, RValueCastExpr, ValueCategory };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
 
 /* 
@@ -90,6 +90,7 @@ use crate::ast::stmt::{ Stmt, ReturnStmt };
  */
 pub struct Parser<'s> {
     lexer: CachedLexer<'s>,
+    prec_table: BinOpPrec,
 }
 
 macro_rules! expr_peek {
@@ -103,7 +104,7 @@ macro_rules! expr_peek {
 
 impl<'s> Parser<'s> {
     pub fn new(lexer: CachedLexer<'s>) -> Self {
-        Self { lexer }
+        Self { lexer, prec_table: BinOpPrec::new() }
     }
 
     fn expect(&mut self, kind: TokenKind) -> Option<Token<'s>> {
@@ -179,6 +180,10 @@ impl<'s> Parser<'s> {
     }
 
     pub fn parse_expr(&mut self, scope: &Scope) -> Option<Expr> {
+        self.parse_assign_expr(scope)
+    }
+
+    fn parse_primary_expr(&mut self, scope: &Scope) -> Option<Expr> {
         let tok = self.lexer.peek()?.clone();
 
         match tok.kind() {
@@ -205,11 +210,81 @@ impl<'s> Parser<'s> {
                 Some(Expr::Str(str_lit.lexeme().to_string()))
             }
 
+            TokenKind::LPAREN => {
+                self.lexer.lex()?;
+                let expr = self.parse_expr(scope)?;
+                self.expect(TokenKind::RPAREN)?;
+                Some(expr)
+            }
+
             _ => {
                 eprintln!("Unexpected token {:?} when parsing expression", tok);
                 None
             }
         }
+    }
+    
+    fn cast_ifn_rvalue(&mut self, expr: Expr) -> Expr {
+        if expr.is_lvalue() {
+            Expr::RValueCast(Box::new(RValueCastExpr::new(expr)))
+        }
+        else {
+            expr
+        }
+    }
+
+    fn parse_assign_expr(&mut self, scope: &Scope) -> Option<Expr> {
+        let lhs = self.parse_binary_expr(0, scope)?;
+
+        if *self.lexer.peek()?.kind() != TokenKind::EQ {
+            Some(lhs)
+        }
+        else {
+            self.lexer.lex()?;
+            let rhs = self.parse_assign_expr(scope)?;
+
+            if lhs.is_lvalue() {
+                Some(Expr::Assign(Box::new(AssignExpr::new(
+                    lhs, self.cast_ifn_rvalue(rhs)
+                ))))
+            }
+            else {
+                eprintln!("Left-hand side of assignment must be an lvalue");
+                None
+            }
+        }
+    }
+
+    fn parse_binary_expr(&mut self, prec: usize, scope: &Scope) -> Option<Expr> {
+        let parse_next_prec: Box<dyn Fn(&mut Parser<'s>, &Scope) -> Option<Expr>> = 
+            if prec == self.prec_table.max_prec() {
+                Box::new(|this: &mut Self, scope: &Scope| { this.parse_primary_expr(scope) })
+            } 
+            else {
+                Box::new(|this: &mut Self, scope: &Scope| { this.parse_binary_expr(prec + 1, scope) })
+            };
+
+        let mut lhs = parse_next_prec(self, scope)?;
+        
+        while let Ok(op_kind) = TryInto::<BinaryOpKind>::try_into(self.lexer.peek()?.kind().clone()) {
+            if !self.prec_table.ops_with_prec(prec).contains(&op_kind.into()) {
+                break;
+            }
+
+            self.lexer.lex()?;
+            let rhs = parse_next_prec(self, scope)?;
+
+            lhs = Expr::Binary(Box::new(
+                BinaryExpr::new(
+                    op_kind.into(), 
+                    // binary expressions expect both sides to be rvalues
+                    self.cast_ifn_rvalue(lhs), 
+                    self.cast_ifn_rvalue(rhs)
+                )
+            ));
+        }
+
+        Some(lhs)
     }
 
     fn parse_declarator(&mut self, tracker: &mut Scope) -> Option<Declarator> {
@@ -331,8 +406,6 @@ impl<'s> Parser<'s> {
             }
         }
 
-        print!("{:?}", param_decls);
-
         let mut fn_decl = FnDecl::new(
             Declarator { 
                 name: name.to_string(), 
@@ -416,6 +489,29 @@ impl<'s> Parser<'s> {
                 None
             }
         }
+    }
+}
+
+struct BinOpPrec {
+    prec_table: Vec<Vec<BinaryOp>>,
+}
+
+impl BinOpPrec {
+    pub fn new() -> Self {
+        let table = vec![
+            vec![BinaryOp::Add, BinaryOp::Sub],
+            vec![BinaryOp::Mul, BinaryOp::Div, BinaryOp::Mod],
+        ];
+
+        Self { prec_table: table }
+    }
+
+    pub fn ops_with_prec(&self, prec: usize) -> &Vec<BinaryOp> {
+        &self.prec_table[prec as usize]
+    }
+
+    pub fn max_prec(&self) -> usize {
+        self.prec_table.len() - 1
     }
 }
 

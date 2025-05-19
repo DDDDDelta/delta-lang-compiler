@@ -44,7 +44,7 @@ fn operators_and_delimiters() {
         Token::new(MINUS,  "-"),
         Token::new(STAR,   "*"),
         Token::new(SLASH,  "/"),
-        Token::new(AMP,    "%"),
+        Token::new(PERCENT,    "%"),
         Token::new(EQ,     "="),
         Token::new(COMMA,  ","),
         Token::new(SEMI,   ";"),

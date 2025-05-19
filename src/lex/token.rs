@@ -1,6 +1,8 @@
 use subenum::subenum;
 
-#[subenum(KeywordKind)]
+use crate::ast::expr::BinaryOp;
+
+#[subenum(KeywordKind, BinaryOpKind)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TokenKind {
     #[subenum(KeywordKind)]
@@ -14,12 +16,22 @@ pub enum TokenKind {
 
     #[subenum(KeywordKind)]
     RETURN,
-   
+    
+    #[subenum(BinaryOpKind)]
     PLUS,
+
+    #[subenum(BinaryOpKind)]
     MINUS,
+
+    #[subenum(BinaryOpKind)]
     STAR,
+
+    #[subenum(BinaryOpKind)]
     SLASH,
-    AMP,
+
+    #[subenum(BinaryOpKind)]
+    PERCENT,
+
     EQ,
     COMMA,
     SEMI,
@@ -42,6 +54,29 @@ impl KeywordKind {
             KeywordKind::I32 => "i32",
             KeywordKind::RETURN => "return",
         }
+    }
+}
+
+impl BinaryOpKind {
+    pub fn to_op(&self) -> BinaryOp {
+        let s: Self = TokenKind::PLUS.try_into().unwrap();
+
+        use crate::ast::expr::BinaryOp::*;
+        use self::BinaryOpKind::*;
+
+        match self {
+            PLUS => Add,
+            MINUS => Sub,
+            STAR => Mul,
+            SLASH => Div,
+            PERCENT => Mod,
+        }
+    }
+}
+
+impl Into<BinaryOp> for BinaryOpKind {
+    fn into(self) -> BinaryOp {
+        self.to_op()
     }
 }
 
