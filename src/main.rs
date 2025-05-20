@@ -6,6 +6,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 use std::rc::Rc;
+use std::process::ExitCode;
 
 use inkwell::builder::Builder;
 use inkwell::context::Context;
@@ -15,6 +16,7 @@ use inkwell::targets::{ Target, TargetMachine, InitializationConfig, TargetTripl
 use inkwell::values::{ BasicValueEnum, FunctionValue, InstructionValue, PointerValue };
 use inkwell::{ AddressSpace, OptimizationLevel };
 
+use crate::driver::compile;
 use crate::ast::decl::{ Declarator, ParamDecl };
 use crate::ast::expr_type::{ Type, FnType };
 use crate::ast::decl::{ Decl, LocalDecl, TopLevelDecl, VarDecl, FnDecl };
@@ -27,8 +29,10 @@ mod code_gen;
 mod ast;
 mod parse;
 mod lex;
+mod driver;
 
-fn main() {
+fn main() -> ExitCode {
+    /*
     // arg processing
     let input_file = "hello.mtxx";
     let output_file = "hello";
@@ -417,4 +421,13 @@ fn main() {
             eprintln!("Failed to execute command: {}", e);
         }
     }
+    */
+
+    let exit_code = compile(
+        "tests/code/hello.mtxx", 
+        "hello", 
+    );
+
+    println!("Compiler exited with code: {}", exit_code);
+    ExitCode::from(exit_code as u8)
 }

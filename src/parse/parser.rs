@@ -6,7 +6,7 @@ use std::ptr::{ null, null_mut };
 use crate::lex::cached_lexer::CachedLexer;
 use crate::lex::token::{ BinaryOpKind, Token, TokenKind };
 use crate::ast::decl::{ Decl, Declarator, FnDecl, LocalDecl, Named, NamedDecl, ParamDecl, TopLevelDecl, VarDecl };
-use crate::ast::expr_type::{FnType, Type};
+use crate::ast::expr_type::{ FnType, Type };
 use crate::ast::expr::{ AssignExpr, BinaryExpr, BinaryOp, Expr, RValueCastExpr, ValueCategory };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
 
@@ -74,7 +74,7 @@ use crate::ast::stmt::{ Stmt, ReturnStmt };
  *     ;
  *     
  * mul_expr
- *     : mul_expr (STAR | SLASH | AMP) postfix_expr
+ *     : mul_expr (STAR | SLASH | PERCENT) postfix_expr
  *     | postfix_expr
  *     ;
  *     
@@ -121,8 +121,9 @@ impl<'s> Parser<'s> {
     pub fn parse_all(&mut self) -> Option<Vec<TopLevelDecl>> {
         let mut scope = Scope::empty();
         let mut decls = Vec::new();
-        while let Some(tok) = self.lexer.lex() {
+        while let Some(tok) = self.lexer.peek() {
             if *tok.kind() == TokenKind::EOF {
+                self.lexer.lex()?;
                 break;
             }
 
@@ -463,7 +464,7 @@ impl<'s> Parser<'s> {
                     expr_peek!() => {
                         let expr = self.parse_expr(scope)?;
                         self.expect(TokenKind::SEMI)?;
-                        Some(Stmt::Return(ReturnStmt::new(expr.into()).into()))
+                        Some(Stmt::Return(ReturnStmt::new(self.cast_ifn_rvalue(expr).into()).into()))
                     }
 
                     TokenKind::SEMI => {

@@ -20,7 +20,7 @@ use inkwell::values::{
 use inkwell::AddressSpace;
 
 use crate::ast::decl::{ Decl, FnDecl, LocalDecl, Named, TopLevelDecl, VarDecl };
-use crate::ast::expr_type::{FnType, Type};
+use crate::ast::expr_type::{ FnType, Type };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
 use crate::ast::expr::{ BinaryExpr, BinaryOp, Expr };
 

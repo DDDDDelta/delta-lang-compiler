@@ -277,8 +277,8 @@ fn binary_precedence_multiplication_bind_tighter_than_addition() {
             match add.rhs() {
                 Expr::Binary(mul) => {
                     assert!(matches!(mul.op(), BinaryOp::Mul));
-                    assert!(matches!(&*mul.lhs(), Expr::Int(2)));
-                    assert!(matches!(&*mul.rhs(), Expr::Int(3)));
+                    assert!(matches!(mul.lhs(), Expr::Int(2)));
+                    assert!(matches!(mul.rhs(), Expr::Int(3)));
                 }
                 _ => panic!("right-hand side of add must be a multiplication")
             }
