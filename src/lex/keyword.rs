@@ -2,10 +2,11 @@ use std::collections::{ hash_map::Entry, HashMap };
 
 use crate::lex::token::{ TokenKind, KeywordKind };
 
-pub const KEYWORD_KIND_LIST: [KeywordKind; 4] = [
+pub const KEYWORD_KIND_LIST: [KeywordKind; 5] = [
     KeywordKind::FN,
     KeywordKind::LET,
     KeywordKind::I32,
+    KeywordKind::I8,
     KeywordKind::RETURN,
 ];
 

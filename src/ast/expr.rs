@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::ast::decl::Decl;
-use crate::ast::expr_type::Type;
+use crate::ast::expr_type::{ Type, PtrType };
 use crate::lex::token::TokenKind;
 
 #[derive(Debug)]
@@ -37,7 +37,7 @@ impl Expr {
     pub fn ty(&self) -> Type {
         match self {
             Expr::Int(_) => Type::I32,
-            Expr::Str(_) => Type::I32,
+            Expr::Str(_) => Type::Ptr(Box::new(PtrType::new(Type::I8))),
             Expr::Call(call) => Type::I32, // Placeholder, should be the return type of the function
             Expr::RValueCast(_) => Type::I32,
             Expr::DeclRef(decl) => {

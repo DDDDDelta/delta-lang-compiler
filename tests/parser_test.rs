@@ -16,10 +16,10 @@ use cpluspluswocaonima::ast::decl::{ Declarator, LocalDecl, Named, NamedDecl, To
 fn parse_integer_literal_expr() {
     let lexer = CachedLexer::new("123");
     let mut parser = Parser::new(lexer);
-    let scope = Scope::empty();
+    let mut scope = Scope::empty();
 
     let expr = parser
-        .parse_expr(&scope)
+        .parse_expr(&mut scope)
         .expect("integer literal should parse");
 
     assert!(matches!(expr, Expr::Int(123)));
@@ -38,7 +38,7 @@ fn identifier_resolves_to_decl() {
     let mut parser = Parser::new(lexer);
 
     let expr = parser
-        .parse_expr(&scope)
+        .parse_expr(&mut scope)
         .expect("identifier should parse");
 
     match expr {
@@ -51,9 +51,9 @@ fn identifier_resolves_to_decl() {
 fn unknown_identifier_returns_none() {
     let lexer = CachedLexer::new("b");
     let mut parser = Parser::new(lexer);
-    let scope = Scope::empty();
+    let mut scope = Scope::empty();
 
-    assert!(parser.parse_expr(&scope).is_none());
+    assert!(parser.parse_expr(&mut scope).is_none());
 }
 
 #[test]
@@ -267,8 +267,8 @@ fn binary_precedence_multiplication_bind_tighter_than_addition() {
     // `1 + 2 * 3` ⇒ ADD(1, MUL(2, 3))
     let lexer = CachedLexer::new("1 + 2 * 3");
     let mut parser = Parser::new(lexer);
-    let scope = Scope::empty();
-    let expr = parser.parse_expr(&scope).expect("expression should parse");
+    let mut scope = Scope::empty();
+    let expr = parser.parse_expr(&mut scope).expect("expression should parse");
 
     match expr {
         Expr::Binary(add) => {
@@ -292,8 +292,8 @@ fn binary_left_associative_for_same_precedence_ops() {
     // `4 - 3 - 2` ⇒ SUB(SUB(4,3), 2)
     let lexer = CachedLexer::new("4 - 3 - 2");
     let mut parser = Parser::new(lexer);
-    let scope = Scope::empty();
-    let expr = parser.parse_expr(&scope).expect("expression should parse");
+    let mut scope = Scope::empty();
+    let expr = parser.parse_expr(&mut scope).expect("expression should parse");
 
     match expr {
         Expr::Binary(outer_sub) => {
@@ -302,8 +302,8 @@ fn binary_left_associative_for_same_precedence_ops() {
             match outer_sub.lhs() {
                 Expr::Binary(inner_sub) => {
                     assert!(matches!(inner_sub.op(), BinaryOp::Sub));
-                    assert!(matches!(&*inner_sub.lhs(), Expr::Int(4)));
-                    assert!(matches!(&*inner_sub.rhs(), Expr::Int(3)));
+                    assert!(matches!(inner_sub.lhs(), Expr::Int(4)));
+                    assert!(matches!(inner_sub.rhs(), Expr::Int(3)));
                 }
                 _ => panic!("left-hand side of outer subtraction must be another subtraction")
             }
@@ -317,8 +317,8 @@ fn binary_parentheses_override_precedence() {
     // `(1 + 2) * 3` ⇒ MUL(ADD(1,2),3)
     let lexer = CachedLexer::new("(1 + 2) * 3");
     let mut parser = Parser::new(lexer);
-    let scope = Scope::empty();
-    let expr = parser.parse_expr(&scope).expect("expression should parse");
+    let mut scope = Scope::empty();
+    let expr = parser.parse_expr(&mut scope).expect("expression should parse");
 
     match expr {
         Expr::Binary(mul) => {

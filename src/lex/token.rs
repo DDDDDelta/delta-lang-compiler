@@ -15,6 +15,9 @@ pub enum TokenKind {
     I32,
 
     #[subenum(KeywordKind)]
+    I8,
+
+    #[subenum(KeywordKind)]
     RETURN,
     
     #[subenum(BinaryOpKind)]
@@ -52,13 +55,14 @@ impl KeywordKind {
             KeywordKind::FN => "fn",
             KeywordKind::LET => "let",
             KeywordKind::I32 => "i32",
+            KeywordKind::I8 => "i8",
             KeywordKind::RETURN => "return",
         }
     }
 }
 
 impl BinaryOpKind {
-    pub fn to_op(&self) -> BinaryOp {
+    pub fn to_op(self) -> BinaryOp {
         let s: Self = TokenKind::PLUS.try_into().unwrap();
 
         use crate::ast::expr::BinaryOp::*;

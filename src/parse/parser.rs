@@ -6,88 +6,12 @@ use std::ptr::{ null, null_mut };
 use crate::lex::cached_lexer::CachedLexer;
 use crate::lex::token::{ BinaryOpKind, Token, TokenKind };
 use crate::ast::decl::{ Decl, Declarator, FnDecl, LocalDecl, Named, NamedDecl, ParamDecl, TopLevelDecl, VarDecl };
-use crate::ast::expr_type::{ FnType, Type };
-use crate::ast::expr::{ AssignExpr, BinaryExpr, BinaryOp, Expr, RValueCastExpr, ValueCategory };
+use crate::ast::expr_type::{ FnType, PtrType, Type };
+use crate::ast::expr::{ AssignExpr, BinaryExpr, BinaryOp, CallExpr, Expr, RValueCastExpr, ValueCategory };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
 
-/* 
- * *** Parser Rule ***
- * 
- * program
- *     : decl* EOF
- *     ;
- * 
- * decl: var_decl
- *     | fn_decl
- *     ;
- * 
- * type: I32
- *     ;
- * 
- * declarator
- *     : ID type
- *     ;
- * 
- * declarator_list
- *     : (declarator (COMMA declarator)*)?
- *     ;
- *     
- * var_decl
- *     : LET declarator EQ expr SEMI
- *     ;
- * 
- * fn_decl
- *     : FN ID LPAREN declarator_list RPAREN LBRACE
- *     stmt*
- *     RBRACE
- *     ;
- *     
- * stmt: var_decl
- *     | expr SEMI
- *     | return_stmt
- *     ;
- *     
- * return_stmt
- *     : RETURN expr SEMI
- *     ;
- * 
- * expr: assign_expr
- *     ;
- *     
- * expr_list
- *     : (expr (COMMA expr)*)?
- *     ;
- *     
- * primary_expr
- *     : ID
- *     | INT
- *     | STR
- *     | paren_expr
- *     ;
- *     
- * paren_expr
- *     : LPAREN expr RPAREN
- *     ;
- *     
- * postfix_expr
- *     : primary_expr (LPAREN expr_list RPAREN)*
- *     ;
- *     
- * mul_expr
- *     : mul_expr (STAR | SLASH | PERCENT) postfix_expr
- *     | postfix_expr
- *     ;
- *     
- * add_expr
- *     : add_expr (PLUS | MINUS) mul_expr
- *     | mul_expr
- *     ;
- *     
- * assign_expr
- *     : add_expr EQ assign_expr
- *     | add_expr
- *     ;
- */
+use super::literals::parse_string_literal;
+
 pub struct Parser<'s> {
     lexer: CachedLexer<'s>,
     prec_table: BinOpPrec,
@@ -180,11 +104,11 @@ impl<'s> Parser<'s> {
         }
     }
 
-    pub fn parse_expr(&mut self, scope: &Scope) -> Option<Expr> {
+    pub fn parse_expr(&mut self, scope: &mut Scope) -> Option<Expr> {
         self.parse_assign_expr(scope)
     }
 
-    fn parse_primary_expr(&mut self, scope: &Scope) -> Option<Expr> {
+    fn parse_primary_expr(&mut self, scope: &mut Scope) -> Option<Expr> {
         let tok = self.lexer.peek()?.clone();
 
         match tok.kind() {
@@ -208,7 +132,7 @@ impl<'s> Parser<'s> {
 
             TokenKind::STR => {
                 let str_lit = self.expect(TokenKind::STR)?;
-                Some(Expr::Str(str_lit.lexeme().to_string()))
+                Some(Expr::Str(parse_string_literal(str_lit.lexeme())?))
             }
 
             TokenKind::LPAREN => {
@@ -234,7 +158,7 @@ impl<'s> Parser<'s> {
         }
     }
 
-    fn parse_assign_expr(&mut self, scope: &Scope) -> Option<Expr> {
+    fn parse_assign_expr(&mut self, scope: &mut Scope) -> Option<Expr> {
         let lhs = self.parse_binary_expr(0, scope)?;
 
         if *self.lexer.peek()?.kind() != TokenKind::EQ {
@@ -256,13 +180,13 @@ impl<'s> Parser<'s> {
         }
     }
 
-    fn parse_binary_expr(&mut self, prec: usize, scope: &Scope) -> Option<Expr> {
-        let parse_next_prec: Box<dyn Fn(&mut Parser<'s>, &Scope) -> Option<Expr>> = 
+    fn parse_binary_expr(&mut self, prec: usize, scope: &mut Scope) -> Option<Expr> {
+        let parse_next_prec: Box<dyn Fn(&mut Parser<'s>, &mut Scope) -> Option<Expr>> = 
             if prec == self.prec_table.max_prec() {
-                Box::new(|this: &mut Self, scope: &Scope| { this.parse_primary_expr(scope) })
+                Box::new(|this: &mut Self, scope: &mut Scope| { this.parse_postfix_expr(scope) })
             } 
             else {
-                Box::new(|this: &mut Self, scope: &Scope| { this.parse_binary_expr(prec + 1, scope) })
+                Box::new(|this: &mut Self, scope: &mut Scope| { this.parse_binary_expr(prec + 1, scope) })
             };
 
         let mut lhs = parse_next_prec(self, scope)?;
@@ -288,6 +212,54 @@ impl<'s> Parser<'s> {
         Some(lhs)
     }
 
+    fn parse_postfix_expr(&mut self, scope: &mut Scope) -> Option<Expr> {
+        let mut lhs = self.parse_primary_expr(scope)?;
+
+        while let Some(tok) = self.lexer.peek() {
+            if *tok.kind() == TokenKind::LPAREN {
+                if !matches!(lhs.ty(), Type::Fn(_)) {
+                    eprintln!("Cannot call non-function type");
+                }
+
+                let args = self.parse_optional_list_of(
+                    &|this: &mut Self, scope: &mut Scope| { this.parse_expr(scope) }, 
+                    TokenKind::COMMA, TokenKind::LPAREN, TokenKind::RPAREN, scope
+                )?;
+
+                let args = args.into_iter()
+                    .map(|arg| self.cast_ifn_rvalue(arg))
+                    .collect::<Vec<_>>();
+
+                match lhs {
+                    Expr::DeclRef(ref decl) => {
+                        if let Decl::Fn(fn_decl) = decl.clone() {
+                            if *fn_decl.ty().param_ty() == args.iter().map(|arg| arg.ty()).collect::<Vec<_>>() {
+                                lhs = Expr::Call(Box::new(CallExpr::new(
+                                    fn_decl.name().to_string(), args
+                                )));
+                            }
+                            else {
+                                eprintln!("Function {} called with incorrect argument types", fn_decl.name());
+                                return None;
+                            }
+                        }
+                    }
+
+                    _ => {
+                        eprintln!("Currently only direct call is supported");
+                        return None;
+                    }
+                }
+
+            }
+            else {
+                break;
+            }
+        }
+
+        Some(lhs)
+    }
+
     fn parse_declarator(&mut self, tracker: &mut Scope) -> Option<Declarator> {
         let tok = self.expect(TokenKind::ID)?;
         // TODO: validate the identifier in the current scope
@@ -297,13 +269,23 @@ impl<'s> Parser<'s> {
         Declarator::new(tok.lexeme().to_string(), ty.clone()).into()
     }
 
-    // TODO: make this properly parse a type
     fn parse_type(&mut self) -> Option<Type> {
         let tok = self.lexer.peek()?;
         match tok.kind() {
             TokenKind::I32 => {
                 self.lexer.lex()?;
                 Type::I32.into()
+            }
+
+            TokenKind::I8 => {
+                self.lexer.lex()?;
+                Type::I8.into()
+            }
+
+            TokenKind::STAR => {
+                self.lexer.lex()?;
+                let ty = self.parse_type()?;
+                Type::Ptr(Box::new(PtrType::new(ty))).into()
             }
 
             _ => { 
@@ -448,7 +430,10 @@ impl<'s> Parser<'s> {
         self.lexer.lex()?;
 
         *fn_decl.body_mut() = Some(body);
-        Rc::new(fn_decl).into()
+        
+        let ret = Rc::new(fn_decl);
+        s.add(&NamedDecl::Fn(ret.clone()));
+        ret.into()
     }
 
     pub fn parse_stmt(&mut self, scope: &mut Scope) -> Option<Stmt> {

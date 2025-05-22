@@ -145,14 +145,15 @@ impl<'ctx> IRGen<'ctx> {
     }
 
     pub fn map_to_llvm_type(
-        &self, 
+        &self,  
         ty: &Type
     ) -> AnyTypeEnum<'ctx> {
         match ty {
             Type::I32 => self.context.i32_type().into(),
+            Type::I8 => self.context.i8_type().into(),
+            Type::Ptr(_) => self.context.ptr_type(AddressSpace::default()).into(),
             Type::Fn(fnty) => {
-                let ret_type: BasicTypeEnum = self.map_to_llvm_type(fnty.ret_ty()).try_into()
-                    .expect("function return type must be a basic type");
+                let ret_type = self.map_to_llvm_type(fnty.ret_ty());
 
                 let param_types = fnty.param_ty().iter()
                     .map(
@@ -161,8 +162,14 @@ impl<'ctx> IRGen<'ctx> {
                                 .expect("function parameter type must be a basic metadata type")
                     )
                     .collect::<Vec<_>>();
+                
 
-                ret_type.fn_type(param_types.as_slice(), false).into()
+                let Ok(ret): Result<BasicTypeEnum, _> = ret_type.try_into() else {
+                    // only possible return type is void if the function is not returning basic type
+                    return ret_type.into_void_type().fn_type(param_types.as_slice(), false).into();                   
+                };
+
+                ret.fn_type(param_types.as_slice(), false).into()
             }
         }
     }

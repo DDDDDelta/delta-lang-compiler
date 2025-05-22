@@ -3,32 +3,6 @@ use std::cmp::{ max, min };
 use crate::lex::token::{ Token, TokenKind };
 use crate::lex::keyword::KeywordMatcher;
 
-/*
- * *** Lexer Rule ***
- * 
- * FN : 'fn';
- * LET : 'let';
- * I32 : 'i32';
-
- * PLUS : '+';
- * MINUS : '-';
- * STAR : '*';
- * SLASH : '/';
- * PERCENT : '%';
- * EQ : '=' ;
- * COMMA : ',' ;
- * SEMI : ';' ;
- * LPAREN : '(' ;
- * RPAREN : ')' ;
- * LCURLY : '{' ;
- * RCURLY : '}' ;
- * 
- * STR : '"' [a-zA-Z_0-9]* '"';
- * INT : [0-9]+;
- * ID: [a-zA-Z_][a-zA-Z_0-9]*;
- * WS: [ \t\n\r\f]+ -> skip ;
- * 
- */
 pub struct Lexer<'s> {
     input: &'s str,
     pos: LexState<'s>,
@@ -76,12 +50,11 @@ impl<'s> Lexer<'s> {
         let start: LexState<'s>;
         loop {
             // there is no character available, EOF reached
-            let c = self.pos.get();
-            if c.is_none() {
+            let Some(c) = self.pos.get() else {
                 return self.handle_eof();
-            }
+            };
 
-            curr = c.unwrap();
+            curr = c;
             if !curr.is_whitespace() {
                 start = self.pos.pre_inc();
                 break;
@@ -93,10 +66,29 @@ impl<'s> Lexer<'s> {
 
         match curr {
             '"' => {
+                let mut escaped = false;
                 loop {
                     // the next character will be consumed anyways
                     // it is either a closing quote or a part of the string
                     if let Some(next) = self.pos.get_inc() {
+                        if next == '\n' || next == '\r' {
+                            eprintln!("unclosed string literal before line break");
+                            self.errored = true;
+                            return None;
+                        }
+
+                        if escaped {
+                            // the next character is part of the string
+                            // escape sequence validation is done in the parser
+                            escaped = false;
+                            continue;
+                        }
+
+                        if next == '\\' {
+                            escaped = true;
+                            continue;
+                        }
+
                         if next == '"' {
                             return Some(start.form_token(&self.pos, TokenKind::STR));
                         }

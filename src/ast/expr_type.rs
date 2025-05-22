@@ -1,7 +1,9 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Type {
     I32,
+    I8,
     Fn(Box<FnType>),
+    Ptr(Box<PtrType>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,5 +23,20 @@ impl FnType {
 
     pub fn ret_ty(&self) -> &Type {
         &self.ret_ty
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PtrType {
+    pointee: Type,
+}
+
+impl PtrType {
+    pub fn new(pointee: Type) -> Self {
+        PtrType { pointee }
+    }
+
+    pub fn pointee(&self) -> &Type {
+        &self.pointee
     }
 }
