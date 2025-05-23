@@ -8,6 +8,7 @@ use inkwell::targets::{ InitializationConfig, Target, TargetTriple };
 use inkwell::OptimizationLevel;
 
 use crate::lex::cached_lexer::CachedLexer;
+use crate::lex::lex_all;
 use crate::parse::parser::Parser;
 use crate::code_gen::ir_gen::IRGen;
 

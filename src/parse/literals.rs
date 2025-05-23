@@ -5,7 +5,7 @@ pub fn parse_string_literal(input: &str) -> Option<String> {
     let mut result = String::new();
     let mut in_escape = false;
 
-    for c in input.chars() {
+    for c in input.chars().skip(1) {
         if in_escape {
             match c {
                 'n' => result.push('\n'),

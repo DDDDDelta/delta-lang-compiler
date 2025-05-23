@@ -2,11 +2,11 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
-use cpluspluswocaonima::lex::lexer::Lexer;
-use cpluspluswocaonima::lex::cached_lexer::CachedLexer;
-use cpluspluswocaonima::lex::token::TokenKind::{ self, * };
-use cpluspluswocaonima::lex::token::Token;
-use cpluspluswocaonima::lex::lex_all;
+use deltac::lex::lexer::Lexer;
+use deltac::lex::cached_lexer::CachedLexer;
+use deltac::lex::token::TokenKind::{ self, * };
+use deltac::lex::token::Token;
+use deltac::lex::lex_all;
 
 /* --- basic lexical categories --- */
 

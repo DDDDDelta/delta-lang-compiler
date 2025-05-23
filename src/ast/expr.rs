@@ -4,6 +4,8 @@ use crate::ast::decl::Decl;
 use crate::ast::expr_type::{ Type, PtrType };
 use crate::lex::token::TokenKind;
 
+use super::decl::NamedDecl;
+
 #[derive(Debug)]
 pub enum Expr {
     Int(i32),
@@ -34,11 +36,29 @@ impl Expr {
         self.value_category().is_rvalue()
     }
 
+    pub fn as_declref(&self) -> &Decl {
+        if let Expr::DeclRef(decl) = self {
+            decl
+        } 
+        else {
+            panic!("Expected DeclRef, found {:?}", self);
+        }
+    }
+
+    pub fn as_string(&self) -> &String {
+        if let Expr::Str(s) = self {
+            s
+        } 
+        else {
+            panic!("Expected String, found {:?}", self);
+        }
+    }
+
     pub fn ty(&self) -> Type {
         match self {
             Expr::Int(_) => Type::I32,
             Expr::Str(_) => Type::Ptr(Box::new(PtrType::new(Type::I8))),
-            Expr::Call(call) => Type::I32, // Placeholder, should be the return type of the function
+            Expr::Call(call) => call.callee().ty(), // Placeholder, should be the return type of the function
             Expr::RValueCast(_) => Type::I32,
             Expr::DeclRef(decl) => {
                 match decl {
@@ -91,17 +111,17 @@ impl RValueCastExpr {
 
 #[derive(Debug)]
 pub struct CallExpr {
-    callee: String,
+    callee: Expr,
     args: Vec<Expr>,
 }
 
 impl CallExpr {
-    pub fn new(callee: String, args: Vec<Expr>) -> Self {
+    pub fn new(callee: Expr, args: Vec<Expr>) -> Self {
         assert!(args.iter().all(|arg| arg.is_rvalue()));
         CallExpr { callee, args }
     }
 
-    pub fn callee(&self) -> &str {
+    pub fn callee(&self) -> &Expr {
         &self.callee
     }
 

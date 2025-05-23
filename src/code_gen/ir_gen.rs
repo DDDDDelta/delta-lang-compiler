@@ -19,7 +19,7 @@ use inkwell::values::{
 };
 use inkwell::AddressSpace;
 
-use crate::ast::decl::{ Decl, FnDecl, LocalDecl, Named, TopLevelDecl, VarDecl };
+use crate::ast::decl::{ Decl, FnDecl, LocalDecl, Named, NamedDecl, TopLevelDecl, VarDecl };
 use crate::ast::expr_type::{ FnType, Type };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
 use crate::ast::expr::{ BinaryExpr, BinaryOp, Expr };
@@ -391,6 +391,32 @@ impl<'ctx> IRGen<'ctx> {
             Stmt::LocalDecl(decl) => {
                 self.gen_local_decl(decl, tracker);
             }
+            Stmt::Print(print_stmt) => {
+                let format = self.gen_expr_non_void(
+                    print_stmt.format(), 
+                    tracker
+                );
+                let args = print_stmt.args()
+                    .iter()
+                    .map(|arg| self.gen_expr_non_void(arg, tracker))
+                    .collect::<Vec<_>>();
+
+                let mut arg_values: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
+                arg_values.push(format.into());
+
+                for arg in args {
+                    arg_values.push(arg.into());
+                }
+
+                let fn_value = self.module.get_function("printf")
+                    .expect("this should be a builtin function");
+                
+                let _ = self.builder.build_call(
+                    fn_value, 
+                    &arg_values.as_slice(), 
+                    "printf_res"
+                ).unwrap();
+            }
         }
     }
 
@@ -549,8 +575,10 @@ impl<'ctx> IRGen<'ctx> {
                     arg_values.push(self.gen_expr_non_void(arg, tracker).into());
                 }
 
-                let fn_value = self.module.get_function(callee)
-                    .expect("frontend should assure this function exists");
+                let fn_value = self.module.get_function(
+                    TryInto::<NamedDecl>::try_into(callee.as_declref().clone())
+                        .expect("it must be a function decl ref").name()
+                ).expect("frontend should assure this function exists");
 
                 // calling a function can result in void type
                 match self.builder.build_call(fn_value, &arg_values.as_slice(), "")

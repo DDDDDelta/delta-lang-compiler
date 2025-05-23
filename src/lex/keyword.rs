@@ -2,12 +2,13 @@ use std::collections::{ hash_map::Entry, HashMap };
 
 use crate::lex::token::{ TokenKind, KeywordKind };
 
-pub const KEYWORD_KIND_LIST: [KeywordKind; 5] = [
+pub const KEYWORD_KIND_LIST: [KeywordKind; 6] = [
     KeywordKind::FN,
     KeywordKind::LET,
     KeywordKind::I32,
     KeywordKind::I8,
     KeywordKind::RETURN,
+    KeywordKind::PRINT,
 ];
 
 pub struct KeywordMatcher {

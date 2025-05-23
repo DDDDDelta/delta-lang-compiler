@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 
-use cpluspluswocaonima::lex::cached_lexer::CachedLexer;
-use cpluspluswocaonima::lex::token::TokenKind::{ self, * };
+use deltac::lex::cached_lexer::CachedLexer;
+use deltac::lex::token::TokenKind::{ self, * };
 
 /* -------------------------------------------------------------------------- */
 /*                peek() must *not* consume the underlying token              */

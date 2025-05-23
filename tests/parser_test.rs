@@ -3,14 +3,14 @@
 
 use std::rc::Rc;
 
-use cpluspluswocaonima::ast::expr::{BinaryOp, Expr};
-use cpluspluswocaonima::ast::expr_type::Type;
-use cpluspluswocaonima::ast::stmt::{ Stmt, ReturnStmt };
-use cpluspluswocaonima::parse::parser::{ Parser, Scope };
-use cpluspluswocaonima::lex::cached_lexer::CachedLexer;
-use cpluspluswocaonima::lex::lexer::Lexer;
-use cpluspluswocaonima::lex::token::{ Token, TokenKind };
-use cpluspluswocaonima::ast::decl::{ Declarator, LocalDecl, Named, NamedDecl, TopLevelDecl, VarDecl };
+use deltac::ast::expr::{BinaryOp, Expr};
+use deltac::ast::expr_type::Type;
+use deltac::ast::stmt::{ Stmt, ReturnStmt };
+use deltac::parse::parser::{ Parser, Scope };
+use deltac::lex::cached_lexer::CachedLexer;
+use deltac::lex::lexer::Lexer;
+use deltac::lex::token::{ Token, TokenKind };
+use deltac::ast::decl::{ Declarator, LocalDecl, Named, NamedDecl, TopLevelDecl, VarDecl };
 
 #[test]
 fn parse_integer_literal_expr() {

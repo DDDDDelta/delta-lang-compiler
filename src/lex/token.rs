@@ -19,6 +19,9 @@ pub enum TokenKind {
 
     #[subenum(KeywordKind)]
     RETURN,
+
+    #[subenum(KeywordKind)]
+    PRINT,
     
     #[subenum(BinaryOpKind)]
     PLUS,
@@ -57,6 +60,7 @@ impl KeywordKind {
             KeywordKind::I32 => "i32",
             KeywordKind::I8 => "i8",
             KeywordKind::RETURN => "return",
+            KeywordKind::PRINT => "print",
         }
     }
 }

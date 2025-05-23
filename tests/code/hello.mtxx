@@ -1,9 +1,4 @@
-fn f(i i32) i32 {
-    return i * i;
-}
-
 fn main() i32 {
-    let s *i8 = "12345";
-    let i i32 = 5;
-    return f(i);
+    print "hello world";
+    return 0;
 }

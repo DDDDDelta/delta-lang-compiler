@@ -8,9 +8,8 @@ use crate::lex::token::{ BinaryOpKind, Token, TokenKind };
 use crate::ast::decl::{ Decl, Declarator, FnDecl, LocalDecl, Named, NamedDecl, ParamDecl, TopLevelDecl, VarDecl };
 use crate::ast::expr_type::{ FnType, PtrType, Type };
 use crate::ast::expr::{ AssignExpr, BinaryExpr, BinaryOp, CallExpr, Expr, RValueCastExpr, ValueCategory };
-use crate::ast::stmt::{ Stmt, ReturnStmt };
-
-use super::literals::parse_string_literal;
+use crate::ast::stmt::{ PrintStmt, ReturnStmt, Stmt };
+use crate::parse::literals::parse_string_literal;
 
 pub struct Parser<'s> {
     lexer: CachedLexer<'s>,
@@ -235,7 +234,7 @@ impl<'s> Parser<'s> {
                         if let Decl::Fn(fn_decl) = decl.clone() {
                             if *fn_decl.ty().param_ty() == args.iter().map(|arg| arg.ty()).collect::<Vec<_>>() {
                                 lhs = Expr::Call(Box::new(CallExpr::new(
-                                    fn_decl.name().to_string(), args
+                                    lhs, args
                                 )));
                             }
                             else {
@@ -462,6 +461,31 @@ impl<'s> Parser<'s> {
                         None
                     }
                 }
+            }
+
+            TokenKind::PRINT => {
+                self.lexer.lex()?;
+                let format = self.parse_expr(scope)?;
+
+                if *self.lexer.peek()?.kind() == TokenKind::SEMI {
+                    self.lexer.lex()?;
+                    return Some(Stmt::Print(PrintStmt::new(format, Vec::new()).into()));
+                }
+
+                self.expect(TokenKind::COMMA)?;
+
+                let args = self.parse_list_of(
+                    &|this: &mut Self, scope: &mut Scope| this.parse_expr(scope), 
+                    TokenKind::COMMA, scope
+                )?;
+
+                let args = args.into_iter()
+                    .map(|arg| self.cast_ifn_rvalue(arg))
+                    .collect::<Vec<_>>();
+
+                self.expect(TokenKind::SEMI)?;
+
+                Some(Stmt::Print(PrintStmt::new(format, args).into()))
             }
 
             expr_peek!() => {
