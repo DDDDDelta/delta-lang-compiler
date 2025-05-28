@@ -22,7 +22,7 @@ use inkwell::AddressSpace;
 use crate::ast::decl::{ Decl, FnDecl, LocalDecl, Named, NamedDecl, TopLevelDecl, VarDecl };
 use crate::ast::expr_type::{ FnType, Type };
 use crate::ast::stmt::{ Stmt, ReturnStmt };
-use crate::ast::expr::{ BinaryExpr, BinaryOp, Expr };
+use crate::ast::expr::{ BinaryExpr, BinaryOp, Expr, UnaryExpr, UnaryOp };
 
 pub struct IRGen<'ctx> {
     context: &'ctx Context, 
@@ -149,6 +149,7 @@ impl<'ctx> IRGen<'ctx> {
         ty: &Type
     ) -> AnyTypeEnum<'ctx> {
         match ty {
+            Type::Void => self.context.void_type().into(),
             Type::I32 => self.context.i32_type().into(),
             Type::I8 => self.context.i8_type().into(),
             Type::Ptr(_) => self.context.ptr_type(AddressSpace::default()).into(),
@@ -180,13 +181,6 @@ impl<'ctx> IRGen<'ctx> {
             &self.context.i32_type(), 
             &[self.context.ptr_type(AddressSpace::default()).into()],
             true
-        );
-
-        self.declare_function(
-            "rand", 
-            &self.context.i32_type(), 
-            &[], 
-            false
         );
     }
 
@@ -308,9 +302,6 @@ impl<'ctx> IRGen<'ctx> {
 
         tracker.add(Decl::Var(decl_enum), alloca);
 
-        let initializer = self.gen_expr_non_void(decl.initializer(), tracker);
-        let _ = self.builder.build_store(alloca, initializer);
-
         alloca
     }
 
@@ -382,6 +373,7 @@ impl<'ctx> IRGen<'ctx> {
                     self.builder.build_return(Some(&ret.unwrap())).unwrap();
                 }
                 else { 
+                    // this returns void
                     self.builder.build_return(None).unwrap();
                 }
             }
@@ -524,13 +516,13 @@ impl<'ctx> IRGen<'ctx> {
                     BasicValueEnum::PointerValue(v) => {
                         // rvalue cast represents a load from a pointer
                         let loaded = self.builder.build_load(
-                            self.context.i32_type(), 
+                            v.get_type(), 
                             v, 
                             "rvalue_cast"
                         ).unwrap();
-                        return loaded.into();
+                        return loaded;
                     },
-                    _ => panic!("expect a pointer value (represents a lvalue) for a rvalue cast"),
+                    _ => panic!("expect a pointer value (represents an lvalue) for a rvalue cast"),
                 }
             }
 
@@ -552,6 +544,25 @@ impl<'ctx> IRGen<'ctx> {
 
             Expr::Binary(binary) => {
                 return self.gen_binary_expr(binary, tracker);
+            }
+
+            Expr::Unary(unary) => {
+                let operand = unary.operand();
+                let value = self.gen_expr_non_void(operand, tracker);
+                match unary.op() {
+                    UnaryOp::AddressOf | UnaryOp::Deref => {
+                        return value.into();
+                    }
+
+                    UnaryOp::Pos => value, // no-op
+
+                    UnaryOp::Neg => {
+                        assert!(value.is_int_value());
+                        return self.builder.build_int_neg(
+                            value.into_int_value(), "neg"
+                        ).unwrap().into()
+                    },
+                }
             }
 
             _ => self.gen_expr(expr, tracker).expect("this expression is assumed to be non-void"),
@@ -599,7 +610,7 @@ impl<'ctx> IRGen<'ctx> {
         tracker: &LocalTracker<'ctx>
     ) -> Option<BasicValueEnum<'ctx>> {
         match expr {
-            Expr::Int(_) | Expr::Str(_) | Expr::DeclRef(_) | 
+            Expr::Int(_) | Expr::Str(_) | Expr::DeclRef(_) | Expr::Unary(_) |
             Expr::RValueCast(_) | Expr::Assign(_) | Expr::Binary(_) => 
                 Some(self.gen_expr_non_void(expr, tracker)),
 

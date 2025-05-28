@@ -2,21 +2,51 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use clap::Parser as _;
 use inkwell::context::Context;
 use inkwell::module::Linkage;
-use inkwell::targets::{ InitializationConfig, Target, TargetTriple };
+use inkwell::targets::{ FileType, InitializationConfig, Target, TargetTriple };
 use inkwell::OptimizationLevel;
+use tempfile::{ tempdir, Builder };
 
 use crate::lex::cached_lexer::CachedLexer;
 use crate::lex::lex_all;
 use crate::parse::parser::Parser;
 use crate::code_gen::ir_gen::IRGen;
+use crate::compiler::cl::CLOpt;
 
-pub fn compile(input_file: &str, output_file: &str) -> i32 {
+pub fn compile(args: Vec<String>) -> i32 {
+    // parse args
+    let args = match CLOpt::try_parse_from(args) {
+        Ok(parsed_args) => parsed_args,
+        Err(e) => {
+            eprintln!("{}", e);
+            return 2;
+        }
+    };
+
+    if args.files().len() != 1 {
+        eprintln!("Currently only one file is supported");
+        return 1;
+    }
+
+    // create temporary directory and object file
+    let Ok(temp_dir) = tempdir() else {
+        eprintln!("Failed to create temporary directory");
+        return 1;
+    };
+    let Ok(obj_file) = Builder::new()
+        .suffix(".o")
+        .tempfile_in(temp_dir.path()) else {
+            eprintln!("Failed to create temporary object file");
+            return 1;
+        };
+
     // preperations
-    let object_file = input_file.to_string() + ".o";
+    let input_file = &args.files()[0];
+    let object_file = obj_file.path();
     let Ok(code) = fs::read_to_string(input_file) else {
-        eprintln!("Error reading file {}", input_file);
+        eprintln!("Error reading file {}", input_file.display());
         return 3;
     };
 
@@ -24,9 +54,13 @@ pub fn compile(input_file: &str, output_file: &str) -> i32 {
     let lexer = CachedLexer::new(code.as_str());
     let mut parser = Parser::new(lexer);
     let Some(program) = parser.parse_all() else {
-        eprintln!("Error analyzing file {}", input_file);
+        eprintln!("Error analyzing file {}", input_file.display());
         return 4;
     };
+
+    if args.dump_ast() {
+        println!("{:?}", program);
+    }
 
     // code gen init
     Target::initialize_all(&InitializationConfig::default());
@@ -49,19 +83,24 @@ pub fn compile(input_file: &str, output_file: &str) -> i32 {
     let ir_gen = IRGen::new(
         &context, 
         &target_machine,
-        input_file
+        input_file.to_str().unwrap_or_default(),
     );
     
     let module = ir_gen.module();
-    let builder = ir_gen.builder();
 
     ir_gen.gen_program(&program);
 
-    match module.verify() {
-        Ok(_) => println!("Module verified successfully"),
-        Err(e) => {
-            eprintln!("Module verification failed: {}", e);
-            return 5;
+    if args.emit_llvm() {
+        println!("{}", module.print_to_string().to_string_lossy());
+    }
+
+    if args.verify_llvm() {
+        match module.verify() {
+            Ok(_) => println!("Module verified successfully"),
+            Err(e) => {
+                eprintln!("Module verification failed: {}", e.to_string());
+                return 5;
+            }
         }
     }
 
@@ -69,13 +108,13 @@ pub fn compile(input_file: &str, output_file: &str) -> i32 {
     match target_machine
         .write_to_file(
             &module, 
-            inkwell::targets::FileType::Object, 
+            FileType::Object, 
             Path::new(&object_file)
         ) {
         
         Ok(_) => println!("Object file created successfully"),
         Err(e) => {
-            eprintln!("Failed to create object file: {}", e);
+            eprintln!("Failed to create object file: {}", e.to_string_lossy());
             return 6;
         }
     }
@@ -83,9 +122,11 @@ pub fn compile(input_file: &str, output_file: &str) -> i32 {
     // linking
     let output = Command::new("ld")
         .arg("-o")
-        .arg(output_file)
+        .arg(args.output())
         .arg(object_file)
         .arg("/usr/lib/x86_64-linux-gnu/crt1.o")
+        .arg("/usr/lib/x86_64-linux-gnu/crti.o")
+        .arg("/usr/lib/x86_64-linux-gnu/crtn.o")
         .arg("-lc")
         .arg("-dynamic-linker")
         .arg("/lib64/ld-linux-x86-64.so.2")

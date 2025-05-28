@@ -4,6 +4,7 @@ pub enum Type {
     I8,
     Fn(Box<FnType>),
     Ptr(Box<PtrType>),
+    Void,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

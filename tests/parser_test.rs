@@ -105,7 +105,7 @@ fn name_tracker_detects_duplicates() {
 
 #[test]
 fn parse_function_declaration_basic() {
-    let src = "fn my_function(x i32) { let y i32 = 10; return y; }";
+    let src = "fn my_function(x i32) i32 { let y i32 = 10; return y; }";
     let lexer = CachedLexer::new(src);
     let mut parser = Parser::new(lexer);
     let mut scope = Scope::empty();
@@ -136,7 +136,7 @@ fn parse_function_declaration_empty_body() {
 
 #[test]
 fn parse_function_declaration_with_multiple_params() {
-    let src = "fn add(x i32, y i32) { y; return x; }";
+    let src = "fn add(x i32, y i32) i32 { y; return x; }";
     let lexer = CachedLexer::new(src);
     let mut parser = Parser::new(lexer);
     let mut scope = Scope::empty();
@@ -160,18 +160,13 @@ fn parse_invalid_function_declaration_missing_param_type() {
 }
 
 #[test]
-#[ignore = "reason: not implemented different function return type yet"]
 fn parse_function_with_invalid_return_type() {
-    let src = "fn invalid_return_type() { let x i32 = 10; return x + 1; }";
+    let src = "fn invalid_return_type() i8 { let x i32 = 10; return x + 1; }";
     let lexer = CachedLexer::new(src);
     let mut parser = Parser::new(lexer);
     let mut scope = Scope::empty();
 
-    let func = parser
-        .parse_fn_decl(&mut scope)
-        .expect("function with invalid return type should fail");
-
-    // Expect failure here, handle type mismatch if needed
+    assert!(parser.parse_fn_decl(&mut scope).is_none());
 }
 
 #[test]
@@ -348,4 +343,102 @@ fn function_with_explicit_return_type_parses() {
     assert_eq!(func.name(), "inc");
     // body has one return statement
     assert_eq!(func.body().as_ref().unwrap().len(), 1);
+}
+
+// `print "Hello";` should parse into a `Stmt::Print` with no arguments
+#[test]
+fn parse_print_stmt_literal() {
+    let src = "print \"Hello\";";
+    let lexer = CachedLexer::new(src);
+    let mut parser = Parser::new(lexer);
+    let mut scope = Scope::empty();
+
+    let stmt = parser
+        .parse_stmt(&mut scope)
+        .expect("print statement should parse");
+
+    assert!(matches!(stmt, Stmt::Print(_)));
+}
+
+// `print "%d %d", 1, 2;` should parse into a `Stmt::Print` with arguments
+#[test]
+fn parse_print_stmt_with_args() {
+    let src = "print \"%d %d\", 1, 2;";
+    let lexer = CachedLexer::new(src);
+    let mut parser = Parser::new(lexer);
+    let mut scope = Scope::empty();
+
+    let stmt = parser
+        .parse_stmt(&mut scope)
+        .expect("print statement with args should parse");
+
+    assert!(matches!(stmt, Stmt::Print(_)));
+}
+
+// A call expression with no arguments inside a function body should parse as `Expr::Call`.
+#[test]
+fn parse_function_call_expr_no_args() {
+    let src = "fn foo() { } fn bar() { foo(); }";
+    let lexer = CachedLexer::new(src);
+    let mut parser = Parser::new(lexer);
+    let mut scope = Scope::empty();
+
+    // Parse the first top‑level declaration: `foo`
+    match parser
+        .parse_top_level_decl(&mut scope)
+        .expect("function foo should parse")
+    {
+        TopLevelDecl::Fn(f) => assert_eq!(f.name(), "foo"),
+        _ => panic!("expected function declaration for foo"),
+    }
+
+    // Parse the second top‑level declaration: `bar`
+    match parser
+        .parse_top_level_decl(&mut scope)
+        .expect("function bar should parse")
+    {
+        TopLevelDecl::Fn(f) => {
+            let body = f.body().as_ref().expect("bar has a body");
+            assert_eq!(body.len(), 1);
+            match &body[0] {
+                Stmt::Expr(expr) => assert!(matches!(expr, Expr::Call(_))),
+                _ => panic!("expected expression statement inside bar"),
+            }
+        }
+        _ => panic!("expected function declaration for bar"),
+    }
+}
+
+// A call expression **with** arguments inside a function body should parse as `Expr::Call`.
+#[test]
+fn parse_function_call_expr_with_args() {
+    let src = "fn add(x i32, y i32) { } fn test() { add(1, 2); }";
+    let lexer = CachedLexer::new(src);
+    let mut parser = Parser::new(lexer);
+    let mut scope = Scope::empty();
+
+    // Parse `add`
+    match parser
+        .parse_top_level_decl(&mut scope)
+        .expect("function add should parse")
+    {
+        TopLevelDecl::Fn(f) => assert_eq!(f.name(), "add"),
+        _ => panic!("expected function declaration for add"),
+    }
+
+    // Parse `test`
+    match parser
+        .parse_top_level_decl(&mut scope)
+        .expect("function test should parse")
+    {
+        TopLevelDecl::Fn(f) => {
+            let body = f.body().as_ref().expect("test has a body");
+            assert_eq!(body.len(), 1);
+            match &body[0] {
+                Stmt::Expr(expr) => assert!(matches!(expr, Expr::Call(_))),
+                _ => panic!("expected expression statement inside test"),
+            }
+        }
+        _ => panic!("expected function declaration for test"),
+    }
 }

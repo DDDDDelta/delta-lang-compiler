@@ -2,36 +2,13 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
-use std::io::Write;
-use std::path::Path;
-use std::process::Command;
-use std::rc::Rc;
-use std::process::ExitCode;
-
-use inkwell::builder::Builder;
-use inkwell::context::Context;
-use inkwell::module::{ Linkage, Module };
-use inkwell::types::{ BasicMetadataTypeEnum, BasicType, BasicTypeEnum, IntType };
-use inkwell::targets::{ Target, TargetMachine, InitializationConfig, TargetTriple };
-use inkwell::values::{ BasicValueEnum, FunctionValue, InstructionValue, PointerValue };
-use inkwell::{ AddressSpace, OptimizationLevel };
-
-use crate::driver::compile;
-use crate::ast::decl::{ Declarator, ParamDecl };
-use crate::ast::expr_type::{ Type, FnType };
-use crate::ast::decl::{ Decl, LocalDecl, TopLevelDecl, VarDecl, FnDecl };
-use crate::ast::stmt::{ Stmt, ReturnStmt };
-use crate::ast::expr::{ Expr, CallExpr, AssignExpr, BinaryExpr, BinaryOp, RValueCastExpr };
-use crate::parse::parser::Parser;
-use crate::code_gen::ir_gen::IRGen;
-
 mod code_gen;
 mod ast;
 mod parse;
 mod lex;
-mod driver;
+mod compiler;
 
-fn main() -> ExitCode {
+fn main() -> std::process::ExitCode {
     /*
     // arg processing
     let input_file = "hello.mtxx";
@@ -423,11 +400,8 @@ fn main() -> ExitCode {
     }
     */
 
-    let exit_code = compile(
-        "tests/code/hello.mtxx", 
-        "hello", 
-    );
+    let exit_code = crate::compiler::driver::compile(std::env::args().collect());
 
     println!("Compiler exited with code: {}", exit_code);
-    ExitCode::from(exit_code as u8)
+    std::process::ExitCode::from(exit_code as u8)
 }

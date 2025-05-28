@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::ast::decl::Decl;
 use crate::ast::expr_type::{ Type, PtrType };
-use crate::lex::token::TokenKind;
+use crate::lex::token::{TokenKind, UnaryOpKind};
 
 use super::decl::NamedDecl;
 
@@ -15,6 +15,7 @@ pub enum Expr {
     DeclRef(Decl),
     Assign(Box<AssignExpr>),
     Binary(Box<BinaryExpr>),
+    Unary(Box<UnaryExpr>),
 }
 
 impl Expr {
@@ -23,6 +24,12 @@ impl Expr {
             Expr::Int(_) | Expr::Str(_) | Expr::Call(_) | 
             Expr::RValueCast(_) | Expr::Binary(_)
                 => ValueCategory::RValue,
+
+            Expr::Unary(u) => if matches!(u.op(), UnaryOp::Deref) {
+                ValueCategory::LValue
+            } else {
+                ValueCategory::RValue
+            },
                 
             Expr::DeclRef(_) | Expr::Assign(_) => ValueCategory::LValue,
         }
@@ -34,6 +41,10 @@ impl Expr {
 
     pub fn is_rvalue(&self) -> bool {
         self.value_category().is_rvalue()
+    }
+
+    pub fn is_ptr(&self) -> bool {
+        matches!(self.ty(), Type::Ptr(_))
     }
 
     pub fn as_declref(&self) -> &Decl {
@@ -66,7 +77,14 @@ impl Expr {
                     Decl::Fn(fn_decl) => Type::Fn(Box::new(fn_decl.ty().clone())),
                     Decl::Param(param_decl) => param_decl.ty().clone(),
                 }
-            }
+            },
+            Expr::Unary(unary) => {
+                match unary.op() {
+                    UnaryOp::AddressOf => Type::Ptr(PtrType::new(unary.operand().ty()).into()),
+                    UnaryOp::Deref => unary.operand().ty().clone(),
+                    UnaryOp::Pos | UnaryOp::Neg => Type::I32,
+                }
+            },
             Expr::Assign(_) => Type::I32,
             Expr::Binary(_) => Type::I32,
         }
@@ -203,5 +221,37 @@ impl BinaryExpr {
 
     pub fn rhs_mut(&mut self) -> &mut Expr {
         &mut self.exprs[1]
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub enum UnaryOp {
+    AddressOf,
+    Deref,
+    Pos,
+    Neg,
+}
+
+#[derive(Debug)]
+pub struct UnaryExpr {
+    op: UnaryOp,
+    operand: Expr,
+}
+
+impl UnaryExpr {
+    pub fn new(op: UnaryOp, operand: Expr) -> Self {
+        UnaryExpr { op, operand }
+    }
+
+    pub fn op(&self) -> &UnaryOp {
+        &self.op
+    }
+
+    pub fn operand(&self) -> &Expr {
+        &self.operand
+    }
+
+    pub fn operand_mut(&mut self) -> &mut Expr {
+        &mut self.operand
     }
 }

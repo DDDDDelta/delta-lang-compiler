@@ -146,6 +146,8 @@ impl<'s> Lexer<'s> {
 
             '%' => Some(self.pos.form_token(&start, TokenKind::PERCENT)),
 
+            '&' => Some(self.pos.form_token(&start, TokenKind::AMP)),
+
             '=' => Some(self.pos.form_token(&start, TokenKind::EQ)),
 
             ',' => Some(self.pos.form_token(&start, TokenKind::COMMA)),

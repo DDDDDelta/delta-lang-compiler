@@ -7,7 +7,7 @@ use crate::lex::cached_lexer::CachedLexer;
 use crate::lex::token::{ BinaryOpKind, Token, TokenKind };
 use crate::ast::decl::{ Decl, Declarator, FnDecl, LocalDecl, Named, NamedDecl, ParamDecl, TopLevelDecl, VarDecl };
 use crate::ast::expr_type::{ FnType, PtrType, Type };
-use crate::ast::expr::{ AssignExpr, BinaryExpr, BinaryOp, CallExpr, Expr, RValueCastExpr, ValueCategory };
+use crate::ast::expr::{ AssignExpr, BinaryExpr, BinaryOp, CallExpr, Expr, RValueCastExpr, UnaryExpr, UnaryOp, ValueCategory };
 use crate::ast::stmt::{ PrintStmt, ReturnStmt, Stmt };
 use crate::parse::literals::parse_string_literal;
 
@@ -21,7 +21,11 @@ macro_rules! expr_peek {
         crate::lex::token::TokenKind::ID | 
         crate::lex::token::TokenKind::INT | 
         crate::lex::token::TokenKind::STR | 
-        crate::lex::token::TokenKind::LPAREN
+        crate::lex::token::TokenKind::LPAREN |
+        crate::lex::token::TokenKind::MINUS |
+        crate::lex::token::TokenKind::PLUS |
+        crate::lex::token::TokenKind::AMP |
+        crate::lex::token::TokenKind::STAR
     };
 }
 
@@ -74,7 +78,7 @@ impl<'s> Parser<'s> {
 
     fn is_constinit(&self, expr: &Expr) -> bool {
         match expr {
-            Expr::Int(_) => true,
+            Expr::Int(_) | Expr::Str(_) => true,
             _ => false,
         }
     }
@@ -82,6 +86,10 @@ impl<'s> Parser<'s> {
     fn parse_var_decl(&mut self, top_lv: bool, scope: &mut Scope) -> Option<Rc<VarDecl>> {
         self.expect(TokenKind::LET)?;
         let declarator = self.parse_declarator(scope)?;
+        if *declarator.ty() == Type::Void {
+            eprintln!("Variable cannot have void type");
+            return None;
+        }
         self.expect(TokenKind::EQ)?;
         let expr = self.parse_expr(scope)?;
         self.expect(TokenKind::SEMI)?;
@@ -98,7 +106,7 @@ impl<'s> Parser<'s> {
             Some(decl)
         }
         else {
-            eprintln!("Duplicate variable declaration: {}", declarator.name);
+            eprintln!("Duplicate variable declaration: {}", declarator.name());
             None
         }
     }
@@ -182,7 +190,7 @@ impl<'s> Parser<'s> {
     fn parse_binary_expr(&mut self, prec: usize, scope: &mut Scope) -> Option<Expr> {
         let parse_next_prec: Box<dyn Fn(&mut Parser<'s>, &mut Scope) -> Option<Expr>> = 
             if prec == self.prec_table.max_prec() {
-                Box::new(|this: &mut Self, scope: &mut Scope| { this.parse_postfix_expr(scope) })
+                Box::new(|this: &mut Self, scope: &mut Scope| { this.parse_unary_expr(scope) })
             } 
             else {
                 Box::new(|this: &mut Self, scope: &mut Scope| { this.parse_binary_expr(prec + 1, scope) })
@@ -211,6 +219,50 @@ impl<'s> Parser<'s> {
         Some(lhs)
     }
 
+    fn parse_unary_expr(&mut self, scope: &mut Scope) -> Option<Expr> {
+        let tok = self.lexer.peek()?;
+        match tok.kind() {
+            TokenKind::MINUS | TokenKind::PLUS => {
+                self.lexer.lex()?;
+                let expr = self.parse_unary_expr(scope)?;
+                if expr.ty() != Type::I32 {
+                    eprintln!("Unary minus operator expects i32 type");
+                    return None;
+                }
+
+                Some(Expr::Unary(UnaryExpr::new(
+                    UnaryOp::Neg.into(), 
+                    self.cast_ifn_rvalue(expr)
+                ).into()))
+            }
+
+            TokenKind::STAR => {
+                self.lexer.lex()?;
+                let expr = self.parse_unary_expr(scope)?;
+                if !expr.is_ptr() {
+                    eprintln!("Dereferencing a non-pointer type");
+                    return None;
+                }
+                
+                Some(Expr::Unary(UnaryExpr::new(UnaryOp::Deref, self.cast_ifn_rvalue(expr)).into()))
+            }
+
+            TokenKind::AMP => {
+                self.lexer.lex()?;
+                let expr = self.parse_unary_expr(scope)?;
+                if expr.is_lvalue() {
+                    Some(Expr::Unary(UnaryExpr::new(UnaryOp::AddressOf, expr).into()))
+                }
+                else {
+                    eprintln!("Address-of operator expects an lvalue");
+                    None
+                }
+            }
+
+            _ => self.parse_postfix_expr(scope),
+        }
+    }
+
     fn parse_postfix_expr(&mut self, scope: &mut Scope) -> Option<Expr> {
         let mut lhs = self.parse_primary_expr(scope)?;
 
@@ -218,6 +270,7 @@ impl<'s> Parser<'s> {
             if *tok.kind() == TokenKind::LPAREN {
                 if !matches!(lhs.ty(), Type::Fn(_)) {
                     eprintln!("Cannot call non-function type");
+                    return None;
                 }
 
                 let args = self.parse_optional_list_of(
@@ -252,11 +305,11 @@ impl<'s> Parser<'s> {
 
             }
             else {
-                break;
+                return Some(lhs);
             }
         }
 
-        Some(lhs)
+        None
     }
 
     fn parse_declarator(&mut self, tracker: &mut Scope) -> Option<Declarator> {
@@ -284,7 +337,16 @@ impl<'s> Parser<'s> {
             TokenKind::STAR => {
                 self.lexer.lex()?;
                 let ty = self.parse_type()?;
+                if ty == Type::Void {
+                    eprintln!("void pointer is not implemented (for now)");
+                    return None;
+                }
                 Type::Ptr(Box::new(PtrType::new(ty))).into()
+            }
+
+            TokenKind::VOID => {
+                self.lexer.lex()?;
+                Type::Void.into()
             }
 
             _ => { 
@@ -361,41 +423,48 @@ impl<'s> Parser<'s> {
             &mut curr_scope
         )?;
 
+        for param in &params {
+            if *param.ty() == Type::Void {
+                eprintln!("Function parameter cannot have void type");
+                return None;
+            }
+        }
+
         let ret_ty: Type;
         if self.lexer.peek()?.kind() != &TokenKind::LCURLY {
             ret_ty = self.parse_type()?;
         }
         else {
-            ret_ty = Type::I32;
+            ret_ty = Type::Void;
         }
 
         let mut param_decls: Vec<Rc<ParamDecl>> = Vec::new();
         for param in &params {
-            if param.name == name {
+            if param.name() == name {
                 eprintln!("Function parameter cannot have the same name as the function");
                 return None;
             }
 
-            if curr_scope.find_local(&param.name).is_none() {
+            if curr_scope.find_local(param.name()).is_none() {
                 let decl = Rc::new(ParamDecl::new(param.clone()));
 
                 param_decls.push(decl.clone());
                 curr_scope.add(&NamedDecl::Param(decl.clone()));
             }
             else {
-                eprintln!("Duplicate parameter declaration: {}", param.name);
+                eprintln!("Duplicate parameter declaration: {}", param.name());
                 return None;
             }
         }
 
         let mut fn_decl = FnDecl::new(
-            Declarator { 
-                name: name.to_string(), 
-                ty: Type::Fn(Box::new(FnType::new(
-                    params.into_iter().map(|d| d.ty).collect(), 
+            Declarator::new( 
+                name.to_string(), 
+                Type::Fn(Box::new(FnType::new(
+                    params.into_iter().map(|d| d.ty().clone()).collect(), 
                     ret_ty.clone()
                 ))) 
-            },
+            ),
             param_decls
         );
 
@@ -413,7 +482,7 @@ impl<'s> Parser<'s> {
                     actual_ret = expr.ty();
                 }
                 else {
-                    actual_ret = Type::I32;
+                    actual_ret = Type::Void;
                 }
 
                 if actual_ret != ret_ty {
@@ -466,6 +535,11 @@ impl<'s> Parser<'s> {
             TokenKind::PRINT => {
                 self.lexer.lex()?;
                 let format = self.parse_expr(scope)?;
+                
+                if format.ty() != Type::Ptr(Box::new(PtrType::new(Type::I8))) {
+                    eprintln!("print expects a string as first argument");
+                    return None;
+                }
 
                 if *self.lexer.peek()?.kind() == TokenKind::SEMI {
                     self.lexer.lex()?;

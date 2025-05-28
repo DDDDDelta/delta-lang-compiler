@@ -1,0 +1,7 @@
+fn main() i32 {
+    let i i32 = 5;
+    let p *i32 = &i;
+    *p = 6;
+    print "%d", i;
+    return 0;
+}

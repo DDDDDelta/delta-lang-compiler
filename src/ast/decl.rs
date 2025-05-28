@@ -112,8 +112,8 @@ impl Named for FnDecl {
 
 #[derive(Clone, Debug)]
 pub struct Declarator {
-    pub name: String,
-    pub ty: Type,
+    name: String,
+    ty: Type,
 }
 
 impl Declarator {

@@ -1,8 +1,8 @@
 use subenum::subenum;
 
-use crate::ast::expr::BinaryOp;
+use crate::ast::expr::{ BinaryOp, UnaryOp };
 
-#[subenum(KeywordKind, BinaryOpKind)]
+#[subenum(KeywordKind, BinaryOpKind, UnaryOpKind)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TokenKind {
     #[subenum(KeywordKind)]
@@ -22,14 +22,17 @@ pub enum TokenKind {
 
     #[subenum(KeywordKind)]
     PRINT,
+
+    #[subenum(KeywordKind)]
+    VOID,
     
-    #[subenum(BinaryOpKind)]
+    #[subenum(BinaryOpKind, UnaryOpKind)]
     PLUS,
 
-    #[subenum(BinaryOpKind)]
+    #[subenum(BinaryOpKind, UnaryOpKind)]
     MINUS,
 
-    #[subenum(BinaryOpKind)]
+    #[subenum(BinaryOpKind, UnaryOpKind)]
     STAR,
 
     #[subenum(BinaryOpKind)]
@@ -37,6 +40,9 @@ pub enum TokenKind {
 
     #[subenum(BinaryOpKind)]
     PERCENT,
+
+    #[subenum(UnaryOpKind)]
+    AMP,
 
     EQ,
     COMMA,
@@ -59,6 +65,7 @@ impl KeywordKind {
             KeywordKind::LET => "let",
             KeywordKind::I32 => "i32",
             KeywordKind::I8 => "i8",
+            KeywordKind::VOID => "void",
             KeywordKind::RETURN => "return",
             KeywordKind::PRINT => "print",
         }
@@ -84,6 +91,26 @@ impl BinaryOpKind {
 
 impl Into<BinaryOp> for BinaryOpKind {
     fn into(self) -> BinaryOp {
+        self.to_op()
+    }
+}
+
+impl UnaryOpKind {
+    pub fn to_op(self) -> UnaryOp {
+        use crate::ast::expr::UnaryOp::*;
+        use self::UnaryOpKind::*;
+
+        match self {
+            PLUS => Pos,
+            MINUS => Neg,
+            STAR => Deref,
+            AMP => AddressOf,
+        }
+    }
+}
+
+impl Into<UnaryOp> for UnaryOpKind {
+    fn into(self) -> UnaryOp {
         self.to_op()
     }
 }
