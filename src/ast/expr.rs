@@ -4,12 +4,13 @@ use crate::ast::decl::Decl;
 use crate::ast::expr_type::{ Type, PtrType };
 use crate::lex::token::{TokenKind, UnaryOpKind};
 
-use super::decl::NamedDecl;
+use super::decl::{Named, NamedDecl};
 
 #[derive(Debug)]
 pub enum Expr {
     Int(i32),
     Str(String),
+    Bool(bool),
     Call(Box<CallExpr>),
     RValueCast(Box<RValueCastExpr>),
     DeclRef(Decl),
@@ -22,7 +23,7 @@ impl Expr {
     pub fn value_category(&self) -> ValueCategory {
         match self {
             Expr::Int(_) | Expr::Str(_) | Expr::Call(_) | 
-            Expr::RValueCast(_) | Expr::Binary(_)
+            Expr::RValueCast(_) | Expr::Binary(_) | Expr::Bool(_)
                 => ValueCategory::RValue,
 
             Expr::Unary(u) => if matches!(u.op(), UnaryOp::Deref) {
@@ -65,12 +66,16 @@ impl Expr {
         }
     }
 
+    // TODO: this must be refactored to dispatch logic to the specific expression type
     pub fn ty(&self) -> Type {
         match self {
             Expr::Int(_) => Type::I32,
             Expr::Str(_) => Type::Ptr(Box::new(PtrType::new(Type::I8))),
-            Expr::Call(call) => call.callee().ty(), // Placeholder, should be the return type of the function
-            Expr::RValueCast(_) => Type::I32,
+            Expr::Bool(_) => Type::Bool,
+            Expr::Call(call) => 
+                // currently we support only direct calls so this works
+                call.ty(),
+            Expr::RValueCast(expr) => expr.ty(),
             Expr::DeclRef(decl) => {
                 match decl {
                     Decl::Var(var_decl) => var_decl.ty().clone(),
@@ -85,8 +90,13 @@ impl Expr {
                     UnaryOp::Pos | UnaryOp::Neg => Type::I32,
                 }
             },
-            Expr::Assign(_) => Type::I32,
-            Expr::Binary(_) => Type::I32,
+            Expr::Assign(assign) => assign.lhs().ty().clone(),
+            Expr::Binary(binary) => {
+                match binary.op() {
+                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => Type::I32,
+                    BinaryOp::LAnd | BinaryOp::LOr | BinaryOp::Eq => Type::Bool,
+                }
+            },
         }
     }
 }
@@ -125,6 +135,10 @@ impl RValueCastExpr {
     pub fn operand_mut(&mut self) -> &mut Expr {
         &mut self.operand
     }
+
+    pub fn ty(&self) -> Type {
+        self.operand.ty()
+    }
 }
 
 #[derive(Debug)]
@@ -149,6 +163,10 @@ impl CallExpr {
 
     pub fn args_mut(&mut self) -> &mut Vec<Expr> {
         &mut self.args
+    }
+
+    pub fn ty(&self) -> Type {
+        self.callee().as_declref().as_fn().declarator().ty().clone().into_fn_ty().ret_ty().clone()
     }
 }
 
@@ -188,6 +206,9 @@ pub enum BinaryOp {
     Mul,
     Div,
     Mod,
+    LAnd,
+    LOr,
+    Eq,
 }
 
 #[derive(Debug)]
@@ -203,8 +224,8 @@ impl BinaryExpr {
         BinaryExpr { op, exprs: [lhs, rhs] }
     }
 
-    pub fn op(&self) -> &BinaryOp {
-        &self.op
+    pub fn op(&self) -> BinaryOp {
+        self.op
     }
 
     pub fn lhs(&self) -> &Expr {
@@ -221,6 +242,15 @@ impl BinaryExpr {
 
     pub fn rhs_mut(&mut self) -> &mut Expr {
         &mut self.exprs[1]
+    }
+
+    pub fn ty(&self) -> Type {
+        use BinaryOp::*;
+
+        match self.op {
+            LAnd | LOr | Eq => Type::Bool,
+            Add | Sub | Mul | Div | Mod => Type::I32,
+        }
     }
 }
 

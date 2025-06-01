@@ -1,23 +1,43 @@
-use core::panic;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::fmt::Binary;
-use std::ptr::null;
+use std::ptr::{null, null_mut};
 use std::rc::Rc;
+use std::mem;
 
 use either::Either;
 
+use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
-use inkwell::context::Context;
+use inkwell::context::{AsContextRef, Context};
 use inkwell::data_layout::DataLayout;
 use inkwell::module::{ Linkage, Module };
 use inkwell::targets::TargetMachine;
-use inkwell::types::{ AnyTypeEnum, BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType, IntType };
+use inkwell::types::{ AnyTypeEnum, AsTypeRef, BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType, IntType };
 use inkwell::values::{ 
-    AnyValue, BasicMetadataValueEnum, BasicValue, BasicValueEnum, 
-    FunctionValue, GlobalValue, InstructionValue, IntValue, PointerValue 
+    AnyValue, 
+    AsValueRef, 
+    BasicMetadataValueEnum, 
+    BasicValue, 
+    BasicValueEnum, 
+    FunctionValue, 
+    GlobalValue, 
+    InstructionValue, 
+    IntValue, 
+    PointerValue 
 };
 use inkwell::AddressSpace;
+use llvm_sys::core::{ 
+    LLVMAppendBasicBlockInContext, 
+    LLVMBuildICmp, 
+    LLVMBuildLoad2, 
+    LLVMGetBasicBlockParent, 
+    LLVMGetNextBasicBlock, 
+    LLVMInsertBasicBlockInContext 
+};
+use llvm_sys::prelude::LLVMBasicBlockRef;
+use llvm_sys::LLVMIntPredicate;
 
 use crate::ast::decl::{ Decl, FnDecl, LocalDecl, Named, NamedDecl, TopLevelDecl, VarDecl };
 use crate::ast::expr_type::{ FnType, Type };
@@ -95,7 +115,7 @@ impl<'ctx> LocalTracker<'ctx> {
         LocalTracker { prev: null(), vars: Vec::new() }
     }
 
-    pub fn new(prev: &LocalTracker<'ctx>) -> Self {
+    pub fn new(prev: &LocalTracker<'ctx>, curr_func: FunctionValue<'ctx>) -> Self {
         LocalTracker { prev, vars: Vec::new() }
     }
 
@@ -152,6 +172,7 @@ impl<'ctx> IRGen<'ctx> {
             Type::Void => self.context.void_type().into(),
             Type::I32 => self.context.i32_type().into(),
             Type::I8 => self.context.i8_type().into(),
+            Type::Bool => self.context.bool_type().into(),
             Type::Ptr(_) => self.context.ptr_type(AddressSpace::default()).into(),
             Type::Fn(fnty) => {
                 let ret_type = self.map_to_llvm_type(fnty.ret_ty());
@@ -417,17 +438,151 @@ impl<'ctx> IRGen<'ctx> {
         expr: &BinaryExpr,
         tracker: &LocalTracker<'ctx>
     ) -> BasicValueEnum<'ctx> {
-        // requires: both lhs and rhs are i32 type
+        match expr.op() {
+            BinaryOp::LAnd | BinaryOp::LOr => {
+                let short_on_lhs = matches!(expr.op(), BinaryOp::LAnd);
 
+                let v = self.gen_short_circuit(expr.lhs(), expr.rhs(), short_on_lhs, tracker);
+                v.into()
+            }
+            BinaryOp::Eq => {
+                assert!(expr.lhs().ty() == expr.rhs().ty());
+                let lhs = self.gen_expr_non_void(expr.lhs(), tracker);
+                let rhs = self.gen_expr_non_void(expr.rhs(), tracker);
+                if matches!(expr.lhs().ty(), Type::Ptr(_)) &&
+                   matches!(expr.rhs().ty(), Type::Ptr(_)) {
+                    // pointer equality
+                    unsafe {
+                        // fucking inkwell does not allow me to use icmp on pointers wtf
+                        BasicValueEnum::new(LLVMBuildICmp(self.builder.as_mut_ptr(), 
+                            LLVMIntPredicate::LLVMIntEQ, 
+                            lhs.into_pointer_value().as_value_ref(), 
+                            rhs.into_pointer_value().as_value_ref(), 
+                            CString::new("eq").unwrap().as_ptr()
+                        ))
+                    }
+                }
+                else {
+                    self.builder.build_int_compare(
+                        inkwell::IntPredicate::EQ, 
+                        lhs.into_int_value(), 
+                        rhs.into_int_value(), 
+                        "eq"
+                    ).unwrap().into()
+                }
+            }
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                let ast_lhs = expr.lhs();
+                let ast_rhs = expr.rhs();
+                match (ast_lhs.ty(), ast_rhs.ty()) {
+                    (Type::I32, Type::I32) => { 
+                        self.gen_arith_binary_expr(expr, tracker)
+                    },
+                    _ => panic!("invalid binary expression types: {:?} and {:?}", ast_lhs.ty(), ast_rhs.ty()),
+                }
+            }
+        }
+    }
+
+    fn insert_bb_after(
+        &self, 
+        name: &str,
+        after: BasicBlock<'ctx>
+    ) -> BasicBlock<'ctx> {
+        let c_name = CString::new(name).unwrap();
+        let next_bb = unsafe { LLVMGetNextBasicBlock(after.as_mut_ptr()) };
+        let ret: LLVMBasicBlockRef;
+        if next_bb != null_mut() {
+            ret = unsafe {
+                LLVMInsertBasicBlockInContext(
+                    self.context.as_ctx_ref(), next_bb, 
+                    c_name.as_ptr()
+                )
+            };
+        }
+        else {
+            ret = unsafe {
+                let func   = LLVMGetBasicBlockParent(after.as_mut_ptr());
+                LLVMAppendBasicBlockInContext(
+                    self.context.as_ctx_ref(), func, c_name.as_ptr()
+                )
+            };
+        }
+
+        // inkwell::basic_block::BasicBlock::new is private (╭∩╮ಠ益ಠ)🔥
+        assert!(mem::size_of::<LLVMBasicBlockRef>() == mem::size_of::<BasicBlock>());
+        unsafe { mem::transmute(ret) } // wtf
+    }
+
+    fn gen_short_circuit(
+        &self,
+        lhs: &Expr,
+        rhs: &Expr,
+        short: bool,
+        tracker: &LocalTracker<'ctx>
+    ) -> IntValue<'ctx> {
+        let bool_ty  = self.context.bool_type();
+
+        // this must be a bool
+        let lhs_val = self.gen_expr_non_void(lhs, tracker).into_int_value();
+
+        let parent = self.builder.get_insert_block().unwrap();
+
+        let mut rhs_block = self.insert_bb_after("rhs", parent);
+        let merge_block = self.insert_bb_after("merge", rhs_block);
+
+        if short {
+            // && : false -> merge  |  true -> rhs
+            self.builder.build_conditional_branch(
+                lhs_val, rhs_block, merge_block
+            ).unwrap();
+        } else {
+            // || : true -> merge  |  false -> rhs
+            self.builder.build_conditional_branch(
+                lhs_val, merge_block, rhs_block
+            ).unwrap();
+        }
+
+        self.builder.position_at_end(rhs_block);
+        let rhs_val = self.gen_expr_non_void(rhs, tracker).into_int_value();
+        self.builder.build_unconditional_branch(merge_block).unwrap();
+
+        // retrieve the actual basic block of the generated value
+        rhs_block = self.builder.get_insert_block().unwrap();
+
+        self.builder.position_at_end(merge_block);
+        let phi = self.builder.build_phi(bool_ty, "sc_phi").unwrap();
+
+        if short {
+            phi.add_incoming(&[
+                (&bool_ty.const_zero(), parent),     // short-circuit happened for &&, must be false
+                (&rhs_val,              rhs_block),
+            ]);
+        }
+        else {
+            phi.add_incoming(&[
+                (&bool_ty.const_all_ones(), parent), // short-circuit happened for ||, must be true
+                (&rhs_val,                  rhs_block),
+            ]);
+        }
+
+        phi.as_basic_value().into_int_value()
+    }
+
+    pub fn gen_arith_binary_expr(
+        &self,
+        expr: &BinaryExpr,
+        tracker: &LocalTracker<'ctx>
+    ) -> BasicValueEnum<'ctx> {
         let lhs = self.gen_expr_non_void(expr.lhs(), tracker);
         let rhs = self.gen_expr_non_void(expr.rhs(), tracker);
         let lhs = match lhs {
             BasicValueEnum::IntValue(v) => v,
-            _ => panic!("expect an integer value for binary expression")
+            _ => panic!("expect an integer value for arithmetic binary expression")
         };
         let rhs = match rhs {
             BasicValueEnum::IntValue(v) => v,
-            _ => panic!("expect an integer value for binary expression")
+            _ => panic!("expect an integer value for arithmetic binary expression")
         };
 
         let op = expr.op();
@@ -457,6 +612,8 @@ impl<'ctx> IRGen<'ctx> {
                 self.builder.build_int_signed_rem(
                     lhs, rhs, "mod"
                 ).unwrap().into(),
+            
+            _ => panic!("other cases should be handled separately"),
         }
     }
 
@@ -477,6 +634,12 @@ impl<'ctx> IRGen<'ctx> {
                 );
                 global_str.set_initializer(&self.context.const_string(s.as_bytes(), true));
                 global_str.as_pointer_value().into()
+            }
+
+            Expr::Bool(b) => {
+                let v = self.context.bool_type().const_int(*b as u64, false);
+                v.set_name(b.to_string().as_str());
+                v.into()
             }
 
             // support variable reference only
@@ -515,11 +678,15 @@ impl<'ctx> IRGen<'ctx> {
                 match value {
                     BasicValueEnum::PointerValue(v) => {
                         // rvalue cast represents a load from a pointer
-                        let loaded = self.builder.build_load(
-                            v.get_type(), 
-                            v, 
-                            "rvalue_cast"
-                        ).unwrap();
+                        // inkwell does not support constructing a load with typeenum wtf
+                        let loaded = unsafe {
+                            BasicValueEnum::new(LLVMBuildLoad2(
+                                self.builder.as_mut_ptr(),
+                                self.map_to_llvm_type(&cast.operand().ty()).as_type_ref(),
+                                v.as_value_ref(),
+                                CString::new("rvalue_cast").unwrap().as_ptr(),
+                            ))
+                        };
                         return loaded;
                     },
                     _ => panic!("expect a pointer value (represents an lvalue) for a rvalue cast"),
@@ -611,7 +778,7 @@ impl<'ctx> IRGen<'ctx> {
     ) -> Option<BasicValueEnum<'ctx>> {
         match expr {
             Expr::Int(_) | Expr::Str(_) | Expr::DeclRef(_) | Expr::Unary(_) |
-            Expr::RValueCast(_) | Expr::Assign(_) | Expr::Binary(_) => 
+            Expr::RValueCast(_) | Expr::Assign(_) | Expr::Binary(_) | Expr::Bool(_) => 
                 Some(self.gen_expr_non_void(expr, tracker)),
 
             Expr::Call(_) => 

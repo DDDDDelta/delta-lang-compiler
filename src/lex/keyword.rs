@@ -2,7 +2,7 @@ use std::collections::{ hash_map::Entry, HashMap };
 
 use crate::lex::token::{ TokenKind, KeywordKind };
 
-pub const KEYWORD_KIND_LIST: [KeywordKind; 7] = [
+pub const KEYWORD_KIND_LIST: &[KeywordKind] = &[
     KeywordKind::FN,
     KeywordKind::LET,
     KeywordKind::I32,
@@ -10,6 +10,9 @@ pub const KEYWORD_KIND_LIST: [KeywordKind; 7] = [
     KeywordKind::RETURN,
     KeywordKind::PRINT,
     KeywordKind::VOID,
+    KeywordKind::BOOL,
+    KeywordKind::TRUE,
+    KeywordKind::FALSE,
 ];
 
 pub struct KeywordMatcher {
@@ -48,7 +51,7 @@ impl KeywordMatcher {
                 }
             }
 
-            unsafe { (*last_node).kind = Some(TokenKind::from(keyword)); }
+            unsafe { (*last_node).kind = Some(TokenKind::from(keyword.clone())); }
         }
 
         KeywordMatcher { start_node }

@@ -2,9 +2,19 @@
 pub enum Type {
     I32,
     I8,
+    Bool,
     Fn(Box<FnType>),
     Ptr(Box<PtrType>),
     Void,
+}
+
+impl Type {
+    pub fn into_fn_ty(self) -> FnType {
+        match self {
+            Type::Fn(fn_type) => *fn_type,
+            _ => panic!("Expected function type"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

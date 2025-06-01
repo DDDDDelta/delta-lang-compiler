@@ -25,6 +25,15 @@ pub enum TokenKind {
 
     #[subenum(KeywordKind)]
     VOID,
+
+    #[subenum(KeywordKind)]
+    BOOL,
+
+    #[subenum(KeywordKind)]
+    TRUE,
+
+    #[subenum(KeywordKind)]
+    FALSE,
     
     #[subenum(BinaryOpKind, UnaryOpKind)]
     PLUS,
@@ -43,6 +52,15 @@ pub enum TokenKind {
 
     #[subenum(UnaryOpKind)]
     AMP,
+
+    #[subenum(BinaryOpKind)]
+    EQEQ,
+
+    #[subenum(BinaryOpKind)]
+    AMPAMP,
+
+    #[subenum(BinaryOpKind)]
+    PIPEPIPE,
 
     EQ,
     COMMA,
@@ -68,6 +86,9 @@ impl KeywordKind {
             KeywordKind::VOID => "void",
             KeywordKind::RETURN => "return",
             KeywordKind::PRINT => "print",
+            KeywordKind::BOOL => "bool",
+            KeywordKind::TRUE => "true",
+            KeywordKind::FALSE => "false",
         }
     }
 }
@@ -85,6 +106,9 @@ impl BinaryOpKind {
             STAR => Mul,
             SLASH => Div,
             PERCENT => Mod,
+            AMPAMP => LAnd,
+            PIPEPIPE => LOr,
+            EQEQ => Eq,
         }
     }
 }

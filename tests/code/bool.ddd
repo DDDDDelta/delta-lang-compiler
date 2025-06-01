@@ -1,0 +1,16 @@
+fn main() i32 {
+    let b bool = 1 == 1 && 1 == 2;
+    let c bool = true || false;
+
+    let i i32 = 10;
+    let j i32 = 11;
+
+    b = b || c || i == j;
+
+    return 0;
+}
+
+
+
+    
+    

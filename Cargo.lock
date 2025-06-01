@@ -133,6 +133,7 @@ dependencies = [
  "either",
  "enum_dispatch",
  "inkwell",
+ "llvm-sys",
  "subenum",
  "tempfile",
 ]

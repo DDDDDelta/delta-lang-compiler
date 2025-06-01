@@ -25,7 +25,9 @@ macro_rules! expr_peek {
         crate::lex::token::TokenKind::MINUS |
         crate::lex::token::TokenKind::PLUS |
         crate::lex::token::TokenKind::AMP |
-        crate::lex::token::TokenKind::STAR
+        crate::lex::token::TokenKind::STAR |
+        crate::lex::token::TokenKind::TRUE |
+        crate::lex::token::TokenKind::FALSE
     };
 }
 
@@ -149,6 +151,16 @@ impl<'s> Parser<'s> {
                 Some(expr)
             }
 
+            TokenKind::TRUE => {
+                self.lexer.lex()?;
+                Some(Expr::Bool(true))
+            }
+
+            TokenKind::FALSE => {
+                self.lexer.lex()?;
+                Some(Expr::Bool(false))
+            }
+
             _ => {
                 eprintln!("Unexpected token {:?} when parsing expression", tok);
                 None
@@ -199,12 +211,30 @@ impl<'s> Parser<'s> {
         let mut lhs = parse_next_prec(self, scope)?;
         
         while let Ok(op_kind) = TryInto::<BinaryOpKind>::try_into(self.lexer.peek()?.kind().clone()) {
-            if !self.prec_table.ops_with_prec(prec).contains(&op_kind.into()) {
+            let op_kind = op_kind.to_op();
+
+            if !self.prec_table.ops_with_prec(prec).contains(&op_kind) {
                 break;
             }
 
             self.lexer.lex()?;
             let rhs = parse_next_prec(self, scope)?;
+
+            match (lhs.ty(), rhs.ty()) {
+                (Type::Bool, Type::Bool) if matches!(op_kind, BinaryOp::LAnd | BinaryOp::LOr) => {},
+                (Type::I32, Type::I32) if !matches!(op_kind, BinaryOp::LAnd | BinaryOp::LOr) => {}, 
+                (Type::Ptr(_), Type::Ptr(_)) if op_kind == BinaryOp::Eq => {},
+
+                (Type::Void, _) | (_, Type::Void) => {
+                    eprintln!("Binary operator cannot be applied to void type");
+                    return None;
+                }
+                
+                _ => {
+                    eprintln!("Invalid types for binary operation: {:?} {:?} {:?}", lhs.ty(), op_kind, rhs.ty());
+                    return None;
+                }
+            }
 
             lhs = Expr::Binary(Box::new(
                 BinaryExpr::new(
@@ -332,6 +362,11 @@ impl<'s> Parser<'s> {
             TokenKind::I8 => {
                 self.lexer.lex()?;
                 Type::I8.into()
+            }
+
+            TokenKind::BOOL => {
+                self.lexer.lex()?;
+                Type::Bool.into()
             }
 
             TokenKind::STAR => {
@@ -583,6 +618,9 @@ struct BinOpPrec {
 impl BinOpPrec {
     pub fn new() -> Self {
         let table = vec![
+            vec![BinaryOp::LOr],
+            vec![BinaryOp::LAnd],
+            vec![BinaryOp::Eq],
             vec![BinaryOp::Add, BinaryOp::Sub],
             vec![BinaryOp::Mul, BinaryOp::Div, BinaryOp::Mod],
         ];

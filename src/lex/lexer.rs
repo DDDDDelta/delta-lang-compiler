@@ -26,6 +26,16 @@ impl<'s> Lexer<'s> {
         !self.errored
     }
 
+    fn eat_if_eq(&mut self, c: char) -> bool {
+        if let Some(next) = self.pos.get() {
+            if next == c {
+                self.pos.inc();
+                return true;
+            }
+        }
+        false
+    }
+
     fn handle_eof(&mut self) -> Option<Token<'s>> {
         if self.eof {
             eprintln!("Unexpected EOF");
@@ -146,9 +156,27 @@ impl<'s> Lexer<'s> {
 
             '%' => Some(self.pos.form_token(&start, TokenKind::PERCENT)),
 
-            '&' => Some(self.pos.form_token(&start, TokenKind::AMP)),
+            '&' => { 
+                if self.eat_if_eq('&') {
+                    return Some(self.pos.form_token(&start, TokenKind::AMPAMP));
+                }
+                Some(self.pos.form_token(&start, TokenKind::AMP))
+            }
 
-            '=' => Some(self.pos.form_token(&start, TokenKind::EQ)),
+            '|' => {
+                if self.eat_if_eq('|') {
+                    return Some(self.pos.form_token(&start, TokenKind::PIPEPIPE));
+                }
+                eprintln!("unrecognized character: {}", curr);
+                None
+            }
+
+            '=' => {
+                if self.eat_if_eq('=') {
+                    return Some(self.pos.form_token(&start, TokenKind::EQEQ));
+                }
+                Some(self.pos.form_token(&start, TokenKind::EQ))
+            }
 
             ',' => Some(self.pos.form_token(&start, TokenKind::COMMA)),
 

@@ -32,6 +32,14 @@ impl Decl {
             _ => false,
         }
     }
+
+    pub fn as_fn(&self) -> Rc<FnDecl> {
+        if let Decl::Fn(fn_decl) = self {
+            fn_decl.clone()
+        } else {
+            panic!("Expected FnDecl, found {:?}", self);
+        }
+    }
 }
 
 impl LocalDecl {
