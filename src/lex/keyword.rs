@@ -13,6 +13,7 @@ pub const KEYWORD_KIND_LIST: &[KeywordKind] = &[
     KeywordKind::BOOL,
     KeywordKind::TRUE,
     KeywordKind::FALSE,
+    KeywordKind::EXTERN,
 ];
 
 pub struct KeywordMatcher {

@@ -1,0 +1,7 @@
+extern fn rand() i32;
+
+fn main() i32 {
+    let ret i32 = rand();
+    print "%d", ret;
+    return ret;
+}

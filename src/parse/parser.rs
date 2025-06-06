@@ -71,9 +71,32 @@ impl<'s> Parser<'s> {
             TokenKind::FN => 
                 Some(TopLevelDecl::Fn(self.parse_fn_decl(scope)?)),            
 
+            TokenKind::EXTERN => 
+                self.parse_extern_decl(scope),
+
             _ => {
                 eprintln!("Unexpected token {:?} when parsing top-level declaration", tok); 
                 None 
+            }
+        }
+    }
+
+    pub fn parse_extern_decl(&mut self, scope: &mut Scope) -> Option<TopLevelDecl> {
+        self.expect(TokenKind::EXTERN)?;
+        match self.lexer.peek()?.kind() {
+            TokenKind::FN => {
+                let fn_decl = self.parse_fn_decl_sig(
+                    scope, 
+                    &mut Scope::empty(), 
+                    TokenKind::SEMI
+                )?;
+                self.expect(TokenKind::SEMI)?;
+                TopLevelDecl::Fn(fn_decl).into()
+            }
+            
+            _ => {
+                eprintln!("Expected function declaration after extern, found {:?}", self.lexer.peek()?);
+                None
             }
         }
     }
@@ -88,8 +111,8 @@ impl<'s> Parser<'s> {
     fn parse_var_decl(&mut self, top_lv: bool, scope: &mut Scope) -> Option<Rc<VarDecl>> {
         self.expect(TokenKind::LET)?;
         let declarator = self.parse_declarator(scope)?;
-        if *declarator.ty() == Type::Void {
-            eprintln!("Variable cannot have void type");
+        if matches!(*declarator.ty(), Type::Void | Type::Fn(_)) {
+            eprintln!("Variable cannot have void or function type");
             return None;
         }
         self.expect(TokenKind::EQ)?;
@@ -437,7 +460,7 @@ impl<'s> Parser<'s> {
         ret.into()
     }
 
-    pub fn parse_fn_decl(&mut self, s: &mut Scope) -> Option<Rc<FnDecl>> {
+    fn parse_fn_decl_sig(&mut self, s: &mut Scope, curr_scope: &mut Scope, lookahead: TokenKind) -> Option<Rc<FnDecl>> {
         self.expect(TokenKind::FN)?;
         let tok = self.expect(TokenKind::ID)?;
         let name = tok.lexeme();
@@ -450,12 +473,10 @@ impl<'s> Parser<'s> {
         let param_action = 
             |this: &mut Self, scope: &mut Scope| { this.parse_declarator(scope) }; // maybe refactor this
 
-        let mut curr_scope = Scope::new(s); 
-
         let params = self.parse_optional_list_of(
             &param_action, 
             TokenKind::COMMA, TokenKind::LPAREN, TokenKind::RPAREN,
-            &mut curr_scope
+            curr_scope
         )?;
 
         for param in &params {
@@ -466,7 +487,7 @@ impl<'s> Parser<'s> {
         }
 
         let ret_ty: Type;
-        if self.lexer.peek()?.kind() != &TokenKind::LCURLY {
+        if *self.lexer.peek()?.kind() != lookahead {
             ret_ty = self.parse_type()?;
         }
         else {
@@ -492,7 +513,7 @@ impl<'s> Parser<'s> {
             }
         }
 
-        let mut fn_decl = FnDecl::new(
+        let ret = Rc::new(FnDecl::new(
             Declarator::new( 
                 name.to_string(), 
                 Type::Fn(Box::new(FnType::new(
@@ -501,7 +522,16 @@ impl<'s> Parser<'s> {
                 ))) 
             ),
             param_decls
-        );
+        ));
+        s.add(&NamedDecl::Fn(ret.clone()));
+        Some(ret)
+    }
+
+    pub fn parse_fn_decl(&mut self, s: &mut Scope) -> Option<Rc<FnDecl>> {
+        let mut curr_scope = Scope::new(s); 
+        let fn_decl = self.parse_fn_decl_sig(s, &mut curr_scope, TokenKind::LCURLY)?;
+
+        let ret_ty = fn_decl.ty().ret_ty().clone();
 
         self.expect(TokenKind::LCURLY)?;
         let mut body = Vec::new();
@@ -532,11 +562,8 @@ impl<'s> Parser<'s> {
         // do not use self.expect here, since if lexer errored, it generates extra error messages
         self.lexer.lex()?;
 
-        *fn_decl.body_mut() = Some(body);
-        
-        let ret = Rc::new(fn_decl);
-        s.add(&NamedDecl::Fn(ret.clone()));
-        ret.into()
+        fn_decl.set_body(body);
+        fn_decl.into()
     }
 
     pub fn parse_stmt(&mut self, scope: &mut Scope) -> Option<Stmt> {

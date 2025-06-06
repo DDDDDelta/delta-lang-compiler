@@ -398,7 +398,7 @@ fn parse_function_call_expr_no_args() {
         .expect("function bar should parse")
     {
         TopLevelDecl::Fn(f) => {
-            let body = f.body().as_ref().expect("bar has a body");
+            let body = f.body().expect("bar has a body");
             assert_eq!(body.len(), 1);
             match &body[0] {
                 Stmt::Expr(expr) => assert!(matches!(expr, Expr::Call(_))),
@@ -432,7 +432,7 @@ fn parse_function_call_expr_with_args() {
         .expect("function test should parse")
     {
         TopLevelDecl::Fn(f) => {
-            let body = f.body().as_ref().expect("test has a body");
+            let body = f.body().expect("test has a body");
             assert_eq!(body.len(), 1);
             match &body[0] {
                 Stmt::Expr(expr) => assert!(matches!(expr, Expr::Call(_))),

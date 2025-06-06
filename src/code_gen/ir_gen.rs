@@ -28,6 +28,7 @@ use inkwell::values::{
     PointerValue 
 };
 use inkwell::AddressSpace;
+
 use llvm_sys::core::{ 
     LLVMAppendBasicBlockInContext, 
     LLVMBuildICmp, 
@@ -356,6 +357,10 @@ impl<'ctx> IRGen<'ctx> {
             false
         );
 
+        if !decl.has_body() {
+            return func;
+        }
+
         let mut tracker = LocalTracker::empty();
 
         let entry = self.context.append_basic_block(func, "entry");
@@ -375,7 +380,7 @@ impl<'ctx> IRGen<'ctx> {
             );
         }
 
-        for stmt in decl.body().as_ref().unwrap() {
+        for stmt in decl.body().unwrap() {
             self.gen_stmt(stmt, &mut tracker);
         }
 

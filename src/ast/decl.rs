@@ -1,3 +1,4 @@
+use std::cell::OnceCell;
 use std::rc::Rc;
 
 use subenum::subenum;
@@ -72,7 +73,7 @@ pub trait Named {
 pub struct FnDecl {
     declarator: Declarator,
     params: Vec<Rc<ParamDecl>>,
-    body: Option<Vec<Stmt>>,
+    body: OnceCell<Vec<Stmt>>,
 }
 
 impl FnDecl {
@@ -80,12 +81,14 @@ impl FnDecl {
         FnDecl { 
             declarator,
             params, 
-            body: None  
+            body: OnceCell::new(), 
         }
     }
 
     pub fn new_with_body(declarator: Declarator, params: Vec<Rc<ParamDecl>>, body: Vec<Stmt>) -> Self {
-        FnDecl { declarator, params, body: Some(body) }
+        let ret = FnDecl { declarator, params, body: OnceCell::new() };
+        ret.body.set(body).unwrap();
+        ret
     }
 
     pub fn params(&self) -> &Vec<Rc<ParamDecl>> {
@@ -100,15 +103,15 @@ impl FnDecl {
     }
 
     pub fn has_body(&self) -> bool {
-        self.body.is_some()
+        self.body.get().is_some()
     }
 
-    pub fn body(&self) -> &Option<Vec<Stmt>> {
-        &self.body
+    pub fn body(&self) -> Option<&Vec<Stmt>> {
+        self.body.get()
     }
 
-    pub fn body_mut(&mut self) -> &mut Option<Vec<Stmt>> {
-        &mut self.body
+    pub fn set_body(&self, body: Vec<Stmt>) -> bool {
+        self.body.set(body).is_ok()
     }
 }
 

@@ -34,6 +34,9 @@ pub enum TokenKind {
 
     #[subenum(KeywordKind)]
     FALSE,
+
+    #[subenum(KeywordKind)]
+    EXTERN,
     
     #[subenum(BinaryOpKind, UnaryOpKind)]
     PLUS,
@@ -80,6 +83,7 @@ impl KeywordKind {
     pub fn spelling(&self) -> &'static str {
         match self {
             KeywordKind::FN => "fn",
+            KeywordKind::EXTERN => "extern",
             KeywordKind::LET => "let",
             KeywordKind::I32 => "i32",
             KeywordKind::I8 => "i8",
