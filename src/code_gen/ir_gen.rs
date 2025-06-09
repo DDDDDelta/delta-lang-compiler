@@ -42,7 +42,7 @@ use llvm_sys::LLVMIntPredicate;
 
 use crate::ast::decl::{ Decl, FnDecl, LocalDecl, Named, NamedDecl, TopLevelDecl, VarDecl };
 use crate::ast::expr_type::{ FnType, Type };
-use crate::ast::stmt::{ Stmt, ReturnStmt };
+use crate::ast::stmt::{ ElseBranch, IfStmt, ReturnStmt, Stmt };
 use crate::ast::expr::{ BinaryExpr, BinaryOp, Expr, UnaryExpr, UnaryOp };
 
 pub struct IRGen<'ctx> {
@@ -116,7 +116,7 @@ impl<'ctx> LocalTracker<'ctx> {
         LocalTracker { prev: null(), vars: Vec::new() }
     }
 
-    pub fn new(prev: &LocalTracker<'ctx>, curr_func: FunctionValue<'ctx>) -> Self {
+    pub fn new(prev: &LocalTracker<'ctx>) -> Self {
         LocalTracker { prev, vars: Vec::new() }
     }
 
@@ -387,6 +387,61 @@ impl<'ctx> IRGen<'ctx> {
         func
     }
 
+    pub fn gen_if_stmt(
+        &self,
+        stmt: &IfStmt,
+        tracker: &mut LocalTracker<'ctx>
+    ) {
+        let cond = self.gen_expr_non_void(stmt.cond(), tracker).into_int_value();
+        let parent = self.builder.get_insert_block().unwrap();
+
+        let then_block = self.insert_bb_after("then", parent);
+        let merge_block = self.insert_bb_after("merge", then_block);
+
+        self.builder.build_conditional_branch(
+            cond, 
+            then_block, 
+            merge_block
+        ).unwrap();
+
+        self.builder.position_at_end(then_block);
+
+        for stmt in stmt.then() {
+            self.gen_stmt(stmt, tracker);
+        }
+
+        if self.builder.get_insert_block().unwrap().get_terminator().is_none() {
+            // TODO: control flow analysis
+            self.builder.build_unconditional_branch(merge_block).unwrap();
+        }
+
+        match stmt.elze() {
+            ElseBranch::ElseIf(elif) => {
+                self.gen_if_stmt(elif, &mut LocalTracker::new(tracker));
+            }
+            
+            ElseBranch::Else(elze) => {
+                let else_block = self.insert_bb_after("else", then_block);
+                self.builder.position_at_end(else_block);
+
+                for stmt in elze {
+                    self.gen_stmt(stmt, tracker);
+                }
+
+                if self.builder.get_insert_block().unwrap().get_terminator().is_none() {
+                    // if the else block does not end with a terminator, we branch to merge
+                    // TODO: add basic block tracking
+                    self.builder.build_unconditional_branch(merge_block).unwrap();
+                }
+            }
+
+            ElseBranch::Nothing => {}
+        }
+
+        // merge block
+        self.builder.position_at_end(merge_block);
+    }
+
     pub fn gen_stmt(
         &self,
         stmt: &Stmt,
@@ -402,6 +457,9 @@ impl<'ctx> IRGen<'ctx> {
                     // this returns void
                     self.builder.build_return(None).unwrap();
                 }
+            }
+            Stmt::If(if_stmt) => {
+                self.gen_if_stmt(&if_stmt, tracker);
             }
             Stmt::Expr(expr) => {
                 let _ = self.gen_expr(expr, tracker);

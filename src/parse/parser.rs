@@ -7,8 +7,18 @@ use crate::lex::cached_lexer::CachedLexer;
 use crate::lex::token::{ BinaryOpKind, Token, TokenKind };
 use crate::ast::decl::{ Decl, Declarator, FnDecl, LocalDecl, Named, NamedDecl, ParamDecl, TopLevelDecl, VarDecl };
 use crate::ast::expr_type::{ FnType, PtrType, Type };
-use crate::ast::expr::{ AssignExpr, BinaryExpr, BinaryOp, CallExpr, Expr, RValueCastExpr, UnaryExpr, UnaryOp, ValueCategory };
-use crate::ast::stmt::{ PrintStmt, ReturnStmt, Stmt };
+use crate::ast::expr::{ 
+    AssignExpr, 
+    BinaryExpr, 
+    BinaryOp, 
+    CallExpr, 
+    Expr, 
+    RValueCastExpr, 
+    UnaryExpr, 
+    UnaryOp, 
+    ValueCategory 
+};
+use crate::ast::stmt::{ ElseBranch, IfStmt, PrintStmt, ReturnStmt, Stmt };
 use crate::parse::literals::parse_string_literal;
 
 pub struct Parser<'s> {
@@ -530,40 +540,65 @@ impl<'s> Parser<'s> {
     pub fn parse_fn_decl(&mut self, s: &mut Scope) -> Option<Rc<FnDecl>> {
         let mut curr_scope = Scope::new(s); 
         let fn_decl = self.parse_fn_decl_sig(s, &mut curr_scope, TokenKind::LCURLY)?;
+        curr_scope.set_associated_fn(fn_decl.clone());
 
         let ret_ty = fn_decl.ty().ret_ty().clone();
 
+        fn_decl.set_body(self.parse_block_stmt(&mut curr_scope)?);
+        fn_decl.into()
+    }
+
+    pub fn parse_block_stmt(&mut self, scope: &mut Scope) -> Option<Vec<Stmt>> {
         self.expect(TokenKind::LCURLY)?;
-        let mut body = Vec::new();
+        let mut stmts = Vec::new();
+
         while let Some(tok) = self.lexer.peek() {
             if *tok.kind() == TokenKind::RCURLY {
                 break;
             }
 
-            let stmt = self.parse_stmt(&mut curr_scope)?;
-            if let Stmt::Return(ret) = &stmt {
-                let actual_ret: Type;
-                if let Some(expr) = ret.returned() {
-                    actual_ret = expr.ty();
-                }
-                else {
-                    actual_ret = Type::Void;
-                }
-
-                if actual_ret != ret_ty {
-                    eprintln!("Function {} has inconsistent return type", fn_decl.name());
-                    return None;
-                }
+            if let Some(stmt) = self.parse_stmt(scope) {
+                stmts.push(stmt);
             }
-
-            body.push(stmt);
         }
         // consume the closing curly brace
         // do not use self.expect here, since if lexer errored, it generates extra error messages
+        // I forgot how this works, but I guess I will keep it. 6/7/2025
         self.lexer.lex()?;
 
-        fn_decl.set_body(body);
-        fn_decl.into()
+        Some(stmts)
+    }
+
+    pub fn parse_if_stmt(&mut self, scope: &mut Scope) -> Option<IfStmt> {
+        self.lexer.lex()?;
+        let cond = self.parse_expr(scope)?;
+
+        if cond.ty() != Type::Bool {
+            eprintln!("if condition must be of type bool");
+            return None;
+        }
+
+        let if_body = self.parse_block_stmt(&mut Scope::new(scope))?;
+
+        if *self.lexer.peek()?.kind() != TokenKind::ELSE {
+            return IfStmt::new(cond, if_body, ElseBranch::Nothing).into();
+        }
+
+        self.lexer.lex()?; // consume the ELSE token
+        let else_body = 
+            if *self.lexer.peek()?.kind() == TokenKind::IF {
+                ElseBranch::ElseIf(Box::new(self.parse_if_stmt(scope)?))
+            }
+            else if *self.lexer.peek()?.kind() == TokenKind::LCURLY {
+                let else_body_stmts = self.parse_block_stmt(&mut Scope::new(scope))?;
+                ElseBranch::Else(else_body_stmts).into()
+            }
+            else {
+                eprintln!("Expected if or block statement after 'else'");
+                return None;
+            };
+
+        IfStmt::new(cond, if_body, else_body).into()
     }
 
     pub fn parse_stmt(&mut self, scope: &mut Scope) -> Option<Stmt> {
@@ -575,23 +610,39 @@ impl<'s> Parser<'s> {
 
             TokenKind::RETURN => {
                 self.lexer.lex()?;
-                match self.lexer.peek()?.kind() {
+                let ret = match self.lexer.peek()?.kind() {
                     expr_peek!() => {
                         let expr = self.parse_expr(scope)?;
                         self.expect(TokenKind::SEMI)?;
-                        Some(Stmt::Return(ReturnStmt::new(self.cast_ifn_rvalue(expr).into()).into()))
+                        ReturnStmt::new(self.cast_ifn_rvalue(expr).into())
                     }
 
                     TokenKind::SEMI => {
                         self.lexer.lex()?;
-                        Some(Stmt::Return(ReturnStmt::new(None).into()))
+                        ReturnStmt::new(None)
                     }
 
                     _ => {
                         eprintln!("unexpected token {:?} after return", self.lexer.lex()?);
-                        None
+                        return None;
                     }
+                };
+
+                let actual_ret = if let Some(expr) = ret.returned() {
+                    expr.ty()
                 }
+                else {
+                    Type::Void
+                };
+
+                let fn_decl = scope.associated_fn()
+                    .expect("Return statement outside of function scope");
+                if actual_ret != *fn_decl.ty().ret_ty() {
+                    eprintln!("Function {} has inconsistent return type", fn_decl.name());
+                    return None;
+                }
+
+                Stmt::Return(Box::new(ret)).into()
             }
 
             TokenKind::PRINT => {
@@ -622,6 +673,11 @@ impl<'s> Parser<'s> {
                 self.expect(TokenKind::SEMI)?;
 
                 Some(Stmt::Print(PrintStmt::new(format, args).into()))
+            }
+
+            TokenKind::IF => {
+                let if_stmt = self.parse_if_stmt(scope)?;
+                Some(Stmt::If(Box::new(if_stmt)))
             }
 
             expr_peek!() => {
@@ -668,15 +724,24 @@ impl BinOpPrec {
 pub struct Scope {
     prev: *mut Self,
     decls: HashMap<String, NamedDecl>,
+    associated_fn: Option<Rc<FnDecl>>,
 }
 
 impl Scope {
     pub fn empty() -> Self {
-        Self { prev: null_mut(), decls: HashMap::new() }
+        Self { prev: null_mut(), decls: HashMap::new(), associated_fn: None }
     }
 
     pub fn new(prev: &mut Self) -> Self {
-        Self { prev: prev as *mut Self, decls: HashMap::new() }
+        Self { prev: prev as *mut Self, decls: HashMap::new(), associated_fn: prev.associated_fn.clone() }
+    }
+
+    pub fn set_associated_fn(&mut self, fn_decl: Rc<FnDecl>) {
+        self.associated_fn = Some(fn_decl);
+    }
+
+    pub fn associated_fn(&self) -> Option<Rc<FnDecl>> {
+        self.associated_fn.clone()
     }
 
     pub fn add(&mut self, decl: &NamedDecl) -> bool {

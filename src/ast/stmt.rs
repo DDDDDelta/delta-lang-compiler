@@ -8,6 +8,7 @@ pub enum Stmt {
     Return(Box<ReturnStmt>),
     LocalDecl(LocalDecl),
     Print(Box<PrintStmt>),
+    If(Box<IfStmt>),
 }
 
 #[derive(Debug)]
@@ -50,5 +51,37 @@ impl PrintStmt {
 
     pub fn args_mut(&mut self) -> &mut Vec<Expr> {
         &mut self.args
+    }
+}
+
+#[derive(Debug)]
+pub enum ElseBranch {
+    Else(Vec<Stmt>),
+    ElseIf(Box<IfStmt>),
+    Nothing,
+}
+
+#[derive(Debug)]
+pub struct IfStmt {
+    condition: Expr,
+    then_branch: Vec<Stmt>,
+    else_branch: ElseBranch,
+}
+
+impl IfStmt {
+    pub fn new(condition: Expr, then_branch: Vec<Stmt>, else_branch: ElseBranch) -> Self {
+        IfStmt { condition, then_branch, else_branch }
+    }
+
+    pub fn cond(&self) -> &Expr {
+        &self.condition
+    }
+
+    pub fn then(&self) -> &Vec<Stmt> {
+        &self.then_branch
+    }
+
+    pub fn elze(&self) -> &ElseBranch {
+        &self.else_branch
     }
 }

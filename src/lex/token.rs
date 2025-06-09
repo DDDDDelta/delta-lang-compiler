@@ -37,6 +37,12 @@ pub enum TokenKind {
 
     #[subenum(KeywordKind)]
     EXTERN,
+
+    #[subenum(KeywordKind)]
+    IF,
+
+    #[subenum(KeywordKind)]
+    ELSE,
     
     #[subenum(BinaryOpKind, UnaryOpKind)]
     PLUS,
@@ -93,6 +99,8 @@ impl KeywordKind {
             KeywordKind::BOOL => "bool",
             KeywordKind::TRUE => "true",
             KeywordKind::FALSE => "false",
+            KeywordKind::IF => "if",
+            KeywordKind::ELSE => "else",
         }
     }
 }
