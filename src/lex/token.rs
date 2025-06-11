@@ -43,6 +43,9 @@ pub enum TokenKind {
 
     #[subenum(KeywordKind)]
     ELSE,
+
+    #[subenum(KeywordKind)]
+    WHILE,
     
     #[subenum(BinaryOpKind, UnaryOpKind)]
     PLUS,
@@ -64,6 +67,9 @@ pub enum TokenKind {
 
     #[subenum(BinaryOpKind)]
     EQEQ,
+
+    #[subenum(BinaryOpKind)]
+    BANGEQ,
 
     #[subenum(BinaryOpKind)]
     AMPAMP,
@@ -101,14 +107,13 @@ impl KeywordKind {
             KeywordKind::FALSE => "false",
             KeywordKind::IF => "if",
             KeywordKind::ELSE => "else",
+            KeywordKind::WHILE => "while",
         }
     }
 }
 
 impl BinaryOpKind {
     pub fn to_op(self) -> BinaryOp {
-        let s: Self = TokenKind::PLUS.try_into().unwrap();
-
         use crate::ast::expr::BinaryOp::*;
         use self::BinaryOpKind::*;
 
@@ -121,6 +126,7 @@ impl BinaryOpKind {
             AMPAMP => LAnd,
             PIPEPIPE => LOr,
             EQEQ => Eq,
+            BANGEQ => NEq,
         }
     }
 }

@@ -146,6 +146,14 @@ impl<'s> Lexer<'s> {
                 }
             }
 
+            '!' => {
+                if self.eat_if_eq('=') {
+                    return Some(self.pos.form_token(&start, TokenKind::BANGEQ));
+                }
+                eprintln!("unrecognized character: {}", curr);
+                None
+            }
+
             '+' => Some(self.pos.form_token(&start, TokenKind::PLUS)),
 
             '-' => Some(self.pos.form_token(&start, TokenKind::MINUS)),

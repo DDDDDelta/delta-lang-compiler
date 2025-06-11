@@ -1,8 +1,6 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::ffi::CString;
-use std::fmt::Binary;
-use std::ptr::{null, null_mut};
+use std::ptr::{ null, null_mut };
 use std::rc::Rc;
 use std::mem;
 
@@ -10,20 +8,16 @@ use either::Either;
 
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
-use inkwell::context::{AsContextRef, Context};
-use inkwell::data_layout::DataLayout;
+use inkwell::context::{ AsContextRef, Context };
 use inkwell::module::{ Linkage, Module };
 use inkwell::targets::TargetMachine;
-use inkwell::types::{ AnyTypeEnum, AsTypeRef, BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType, IntType };
-use inkwell::values::{ 
-    AnyValue, 
+use inkwell::types::{ AnyTypeEnum, AsTypeRef, BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType };
+use inkwell::values::{  
     AsValueRef, 
     BasicMetadataValueEnum, 
-    BasicValue, 
     BasicValueEnum, 
     FunctionValue, 
     GlobalValue, 
-    InstructionValue, 
     IntValue, 
     PointerValue 
 };
@@ -41,9 +35,9 @@ use llvm_sys::prelude::LLVMBasicBlockRef;
 use llvm_sys::LLVMIntPredicate;
 
 use crate::ast::decl::{ Decl, FnDecl, LocalDecl, Named, NamedDecl, TopLevelDecl, VarDecl };
-use crate::ast::expr_type::{ FnType, Type };
-use crate::ast::stmt::{ ElseBranch, IfStmt, ReturnStmt, Stmt };
-use crate::ast::expr::{ BinaryExpr, BinaryOp, Expr, UnaryExpr, UnaryOp };
+use crate::ast::expr_type::Type;
+use crate::ast::stmt::{ ElseBranch, IfStmt, Stmt };
+use crate::ast::expr::{ BinaryExpr, BinaryOp, Expr, UnaryOp };
 
 pub struct IRGen<'ctx> {
     context: &'ctx Context, 
@@ -293,6 +287,7 @@ impl<'ctx> IRGen<'ctx> {
         fn_ty: FunctionType<'ctx>,
         is_var_arg: bool
     ) -> FunctionValue<'ctx> {
+        let _ = is_var_arg; // TODO: support vararg functions
         self.module.add_function(name, fn_ty, Some(Linkage::External))
     }
 
@@ -448,6 +443,43 @@ impl<'ctx> IRGen<'ctx> {
         tracker: &mut LocalTracker<'ctx>
     ) {
         match stmt {
+            Stmt::While(while_stmt) => {
+                let parent = self.builder.get_insert_block().unwrap();
+                let cond_block = self.insert_bb_after("while_cond", parent);
+                let body_block = self.insert_bb_after("while_body", cond_block);
+                let merge_block = self.insert_bb_after("while_merge", body_block);
+
+                self.builder.build_unconditional_branch(cond_block).unwrap();
+
+                // build the condition check
+                self.builder.position_at_end(cond_block);
+
+                let cond = self.gen_expr_non_void(
+                    while_stmt.cond(), 
+                    tracker
+                ).into_int_value();
+                self.builder.build_conditional_branch(
+                    cond, 
+                    body_block, 
+                    merge_block
+                ).unwrap();
+
+                // position at the body block
+                self.builder.position_at_end(body_block);
+
+                for stmt in while_stmt.body() {
+                    self.gen_stmt(stmt, tracker);
+                }
+
+                if self.builder.get_insert_block().unwrap().get_terminator().is_none() {
+                    // if the body does not end with a terminator, we branch to the condition check
+                    self.builder.build_unconditional_branch(cond_block).unwrap();
+                }
+
+                // position at the merge block
+                self.builder.position_at_end(merge_block);
+            }
+
             Stmt::Return(return_stmt) => {
                 if let Some(expr) = return_stmt.returned() {
                     let ret = self.gen_expr(expr, tracker);
@@ -458,15 +490,19 @@ impl<'ctx> IRGen<'ctx> {
                     self.builder.build_return(None).unwrap();
                 }
             }
+
             Stmt::If(if_stmt) => {
                 self.gen_if_stmt(&if_stmt, tracker);
             }
+
             Stmt::Expr(expr) => {
                 let _ = self.gen_expr(expr, tracker);
             }
+
             Stmt::LocalDecl(decl) => {
                 self.gen_local_decl(decl, tracker);
             }
+
             Stmt::Print(print_stmt) => {
                 let format = self.gen_expr_non_void(
                     print_stmt.format(), 
@@ -508,17 +544,23 @@ impl<'ctx> IRGen<'ctx> {
                 let v = self.gen_short_circuit(expr.lhs(), expr.rhs(), short_on_lhs, tracker);
                 v.into()
             }
-            BinaryOp::Eq => {
+            BinaryOp::Eq | BinaryOp::NEq => {
                 assert!(expr.lhs().ty() == expr.rhs().ty());
                 let lhs = self.gen_expr_non_void(expr.lhs(), tracker);
                 let rhs = self.gen_expr_non_void(expr.rhs(), tracker);
+                let op = if expr.op() == BinaryOp::Eq { 
+                    LLVMIntPredicate::LLVMIntEQ 
+                } 
+                else { 
+                    LLVMIntPredicate::LLVMIntNE 
+                };
                 if matches!(expr.lhs().ty(), Type::Ptr(_)) &&
                    matches!(expr.rhs().ty(), Type::Ptr(_)) {
                     // pointer equality
                     unsafe {
                         // fucking inkwell does not allow me to use icmp on pointers wtf
                         BasicValueEnum::new(LLVMBuildICmp(self.builder.as_mut_ptr(), 
-                            LLVMIntPredicate::LLVMIntEQ, 
+                            op, 
                             lhs.into_pointer_value().as_value_ref(), 
                             rhs.into_pointer_value().as_value_ref(), 
                             CString::new("eq").unwrap().as_ptr()
@@ -527,7 +569,7 @@ impl<'ctx> IRGen<'ctx> {
                 }
                 else {
                     self.builder.build_int_compare(
-                        inkwell::IntPredicate::EQ, 
+                        op.into(), 
                         lhs.into_int_value(), 
                         rhs.into_int_value(), 
                         "eq"

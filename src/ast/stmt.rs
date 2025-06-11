@@ -9,6 +9,7 @@ pub enum Stmt {
     LocalDecl(LocalDecl),
     Print(Box<PrintStmt>),
     If(Box<IfStmt>),
+    While(Box<WhileStmt>),
 }
 
 #[derive(Debug)]
@@ -83,5 +84,29 @@ impl IfStmt {
 
     pub fn elze(&self) -> &ElseBranch {
         &self.else_branch
+    }
+}
+
+#[derive(Debug)]
+pub struct WhileStmt {
+    condition: Expr,
+    body: Vec<Stmt>,
+}
+
+impl WhileStmt {
+    pub fn new(condition: Expr, body: Vec<Stmt>) -> Self {
+        WhileStmt { condition, body }
+    }
+
+    pub fn cond(&self) -> &Expr {
+        &self.condition
+    }
+
+    pub fn body(&self) -> &Vec<Stmt> {
+        &self.body
+    }
+
+    pub fn body_mut(&mut self) -> &mut Vec<Stmt> {
+        &mut self.body
     }
 }

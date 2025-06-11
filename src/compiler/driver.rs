@@ -4,13 +4,11 @@ use std::process::Command;
 
 use clap::Parser as _;
 use inkwell::context::Context;
-use inkwell::module::Linkage;
 use inkwell::targets::{ FileType, InitializationConfig, Target, TargetTriple };
 use inkwell::OptimizationLevel;
 use tempfile::{ tempdir, Builder };
 
 use crate::lex::cached_lexer::CachedLexer;
-use crate::lex::lex_all;
 use crate::parse::parser::Parser;
 use crate::code_gen::ir_gen::IRGen;
 use crate::compiler::cl::CLOpt;
@@ -76,7 +74,7 @@ pub fn compile(args: Vec<String>) -> i32 {
             Default::default(), 
             Default::default()
         )
-        .expect("Failed to create target machine.");
+        .expect("failed to create target machine.");
 
     // ir generation
     let context = Context::create();

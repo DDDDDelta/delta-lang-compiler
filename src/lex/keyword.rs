@@ -16,6 +16,7 @@ pub const KEYWORD_KIND_LIST: &[KeywordKind] = &[
     KeywordKind::EXTERN,
     KeywordKind::IF,
     KeywordKind::ELSE,
+    KeywordKind::WHILE,
 ];
 
 pub struct KeywordMatcher {

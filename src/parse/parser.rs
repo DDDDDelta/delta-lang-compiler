@@ -1,7 +1,6 @@
-use std::collections::hash_map::Entry;
 use std::rc::Rc;
 use std::collections::HashMap;
-use std::ptr::{ null, null_mut };
+use std::ptr::null_mut;
 
 use crate::lex::cached_lexer::CachedLexer;
 use crate::lex::token::{ BinaryOpKind, Token, TokenKind };
@@ -16,9 +15,8 @@ use crate::ast::expr::{
     RValueCastExpr, 
     UnaryExpr, 
     UnaryOp, 
-    ValueCategory 
 };
-use crate::ast::stmt::{ ElseBranch, IfStmt, PrintStmt, ReturnStmt, Stmt };
+use crate::ast::stmt::{ ElseBranch, IfStmt, PrintStmt, ReturnStmt, Stmt, WhileStmt };
 use crate::parse::literals::parse_string_literal;
 
 pub struct Parser<'s> {
@@ -52,7 +50,7 @@ impl<'s> Parser<'s> {
             Some(tok)
         } 
         else {
-            eprintln!("Unexpected token: expected {:?}, found {:?}", kind, tok.kind());
+            eprintln!("unexpected token: expected {:?}, found {:?}", kind, tok.kind());
             None
         }
     }
@@ -85,7 +83,7 @@ impl<'s> Parser<'s> {
                 self.parse_extern_decl(scope),
 
             _ => {
-                eprintln!("Unexpected token {:?} when parsing top-level declaration", tok); 
+                eprintln!("unexpected token {:?} when parsing top-level declaration", tok); 
                 None 
             }
         }
@@ -105,7 +103,7 @@ impl<'s> Parser<'s> {
             }
             
             _ => {
-                eprintln!("Expected function declaration after extern, found {:?}", self.lexer.peek()?);
+                eprintln!("expected function declaration after extern, found {:?}", self.lexer.peek()?);
                 None
             }
         }
@@ -120,9 +118,9 @@ impl<'s> Parser<'s> {
 
     fn parse_var_decl(&mut self, top_lv: bool, scope: &mut Scope) -> Option<Rc<VarDecl>> {
         self.expect(TokenKind::LET)?;
-        let declarator = self.parse_declarator(scope)?;
+        let declarator = self.parse_declarator()?;
         if matches!(*declarator.ty(), Type::Void | Type::Fn(_)) {
-            eprintln!("Variable cannot have void or function type");
+            eprintln!("variable cannot have void or function type");
             return None;
         }
         self.expect(TokenKind::EQ)?;
@@ -131,7 +129,7 @@ impl<'s> Parser<'s> {
 
         if top_lv {
             if !self.is_constinit(&expr) {
-                eprintln!("Top-level variable declarations must be initialized with a constant expression");
+                eprintln!("top-level variable declarations must be initialized with a constant expression");
                 return None;
             }
         }
@@ -141,7 +139,7 @@ impl<'s> Parser<'s> {
             Some(decl)
         }
         else {
-            eprintln!("Duplicate variable declaration: {}", declarator.name());
+            eprintln!("duplicate variable declaration: {}", declarator.name());
             None
         }
     }
@@ -162,7 +160,7 @@ impl<'s> Parser<'s> {
                     Some(Expr::DeclRef(decl.into()))
                 }
                 else {
-                    eprintln!("Unable to resolve reference to: {}", id);
+                    eprintln!("unable to resolve reference to: {}", id);
                     None
                 }
             }
@@ -195,7 +193,7 @@ impl<'s> Parser<'s> {
             }
 
             _ => {
-                eprintln!("Unexpected token {:?} when parsing expression", tok);
+                eprintln!("unexpected token {:?} when parsing expression", tok);
                 None
             }
         }
@@ -226,7 +224,7 @@ impl<'s> Parser<'s> {
                 ))))
             }
             else {
-                eprintln!("Left-hand side of assignment must be an lvalue");
+                eprintln!("left-hand side of assignment must be an lvalue");
                 None
             }
         }
@@ -375,7 +373,7 @@ impl<'s> Parser<'s> {
         None
     }
 
-    fn parse_declarator(&mut self, tracker: &mut Scope) -> Option<Declarator> {
+    fn parse_declarator(&mut self) -> Option<Declarator> {
         let tok = self.expect(TokenKind::ID)?;
         // TODO: validate the identifier in the current scope
 
@@ -418,7 +416,7 @@ impl<'s> Parser<'s> {
             }
 
             _ => { 
-                eprintln!("Unexpected token {:?} when parsing type", tok);
+                eprintln!("unexpected token {:?} when parsing type", tok);
                 None
             }
         }
@@ -476,12 +474,12 @@ impl<'s> Parser<'s> {
         let name = tok.lexeme();
 
         if s.find(name).is_some() {
-            eprintln!("Duplicate function declaration: {}", name);
+            eprintln!("duplicate function declaration: {}", name);
             return None;
         }
 
         let param_action = 
-            |this: &mut Self, scope: &mut Scope| { this.parse_declarator(scope) }; // maybe refactor this
+            |this: &mut Self, scope: &mut Scope| { let _ = scope; this.parse_declarator() }; // maybe refactor this
 
         let params = self.parse_optional_list_of(
             &param_action, 
@@ -491,7 +489,7 @@ impl<'s> Parser<'s> {
 
         for param in &params {
             if *param.ty() == Type::Void {
-                eprintln!("Function parameter cannot have void type");
+                eprintln!("function parameter cannot have void type");
                 return None;
             }
         }
@@ -507,7 +505,7 @@ impl<'s> Parser<'s> {
         let mut param_decls: Vec<Rc<ParamDecl>> = Vec::new();
         for param in &params {
             if param.name() == name {
-                eprintln!("Function parameter cannot have the same name as the function");
+                eprintln!("function parameter cannot have the same name as the function");
                 return None;
             }
 
@@ -518,7 +516,7 @@ impl<'s> Parser<'s> {
                 curr_scope.add(&NamedDecl::Param(decl.clone()));
             }
             else {
-                eprintln!("Duplicate parameter declaration: {}", param.name());
+                eprintln!("duplicate parameter declaration: {}", param.name());
                 return None;
             }
         }
@@ -541,8 +539,6 @@ impl<'s> Parser<'s> {
         let mut curr_scope = Scope::new(s); 
         let fn_decl = self.parse_fn_decl_sig(s, &mut curr_scope, TokenKind::LCURLY)?;
         curr_scope.set_associated_fn(fn_decl.clone());
-
-        let ret_ty = fn_decl.ty().ret_ty().clone();
 
         fn_decl.set_body(self.parse_block_stmt(&mut curr_scope)?);
         fn_decl.into()
@@ -594,7 +590,7 @@ impl<'s> Parser<'s> {
                 ElseBranch::Else(else_body_stmts).into()
             }
             else {
-                eprintln!("Expected if or block statement after 'else'");
+                eprintln!("expected if or block statement after 'else'");
                 return None;
             };
 
@@ -636,9 +632,9 @@ impl<'s> Parser<'s> {
                 };
 
                 let fn_decl = scope.associated_fn()
-                    .expect("Return statement outside of function scope");
+                    .expect("return statement outside of function scope");
                 if actual_ret != *fn_decl.ty().ret_ty() {
-                    eprintln!("Function {} has inconsistent return type", fn_decl.name());
+                    eprintln!("function {} has inconsistent return type", fn_decl.name());
                     return None;
                 }
 
@@ -680,6 +676,19 @@ impl<'s> Parser<'s> {
                 Some(Stmt::If(Box::new(if_stmt)))
             }
 
+            TokenKind::WHILE => {
+                self.lexer.lex()?;
+                let cond = self.parse_expr(scope)?;
+                
+                if cond.ty() != Type::Bool {
+                    eprintln!("while condition must be of type bool");
+                    return None;
+                }
+
+                let body = self.parse_block_stmt(&mut Scope::new(scope))?;
+                Some(Stmt::While(Box::new(WhileStmt::new(cond, body))))
+            }
+
             expr_peek!() => {
                 let expr = self.parse_expr(scope)?;
                 self.expect(TokenKind::SEMI)?;
@@ -703,7 +712,7 @@ impl BinOpPrec {
         let table = vec![
             vec![BinaryOp::LOr],
             vec![BinaryOp::LAnd],
-            vec![BinaryOp::Eq],
+            vec![BinaryOp::Eq, BinaryOp::NEq],
             vec![BinaryOp::Add, BinaryOp::Sub],
             vec![BinaryOp::Mul, BinaryOp::Div, BinaryOp::Mod],
         ];

@@ -1,10 +1,7 @@
-use std::rc::Rc;
-
 use crate::ast::decl::Decl;
 use crate::ast::expr_type::{ Type, PtrType };
-use crate::lex::token::{TokenKind, UnaryOpKind};
 
-use super::decl::{Named, NamedDecl};
+use super::decl::Named;
 
 #[derive(Debug)]
 pub enum Expr {
@@ -91,12 +88,7 @@ impl Expr {
                 }
             },
             Expr::Assign(assign) => assign.lhs().ty().clone(),
-            Expr::Binary(binary) => {
-                match binary.op() {
-                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => Type::I32,
-                    BinaryOp::LAnd | BinaryOp::LOr | BinaryOp::Eq => Type::Bool,
-                }
-            },
+            Expr::Binary(binary) => binary.ty(),
         }
     }
 }
@@ -209,6 +201,7 @@ pub enum BinaryOp {
     LAnd,
     LOr,
     Eq,
+    NEq,
 }
 
 #[derive(Debug)]
@@ -248,7 +241,7 @@ impl BinaryExpr {
         use BinaryOp::*;
 
         match self.op {
-            LAnd | LOr | Eq => Type::Bool,
+            LAnd | LOr | Eq | NEq => Type::Bool,
             Add | Sub | Mul | Div | Mod => Type::I32,
         }
     }

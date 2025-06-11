@@ -4,7 +4,7 @@ mod keyword;
 pub mod cached_lexer;
 
 use crate::lex::lexer::Lexer;
-use crate::lex::token::{ Token, TokenKind::{ self, * } };
+use crate::lex::token::{ Token, TokenKind::* };
 
 pub const LEXER_RULES: &'static str = r#"
 FN : 'fn';

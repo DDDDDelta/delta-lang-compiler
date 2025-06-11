@@ -1,0 +1,8 @@
+fn main(argc i32, argv **i8) i32 {
+    let i i32 = 0;
+    while i != 5 {
+        i = i + 1;
+        print "%d\n", i;
+    }
+    return i;
+}

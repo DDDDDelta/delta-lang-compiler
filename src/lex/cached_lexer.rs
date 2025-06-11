@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::lex::lexer::Lexer;
-use crate::lex::token::{ Token, TokenKind };
+use crate::lex::token::Token;
 
 pub struct CachedLexer<'s> {
     lexer: Lexer<'s>,
