@@ -35,7 +35,8 @@ macro_rules! expr_peek {
         crate::lex::token::TokenKind::AMP |
         crate::lex::token::TokenKind::STAR |
         crate::lex::token::TokenKind::TRUE |
-        crate::lex::token::TokenKind::FALSE
+        crate::lex::token::TokenKind::FALSE |
+        crate::lex::token::TokenKind::BANG
     };
 }
 
@@ -318,6 +319,17 @@ impl<'s> Parser<'s> {
                     eprintln!("Address-of operator expects an lvalue");
                     None
                 }
+            }
+
+            TokenKind::BANG => {
+                self.lexer.lex()?;
+                let expr = self.parse_unary_expr(scope)?;
+                if expr.ty() != Type::Bool {
+                    eprintln!("Logical NOT operator expects a boolean type");
+                    return None;
+                }
+
+                Some(Expr::Unary(UnaryExpr::new(UnaryOp::Not, self.cast_ifn_rvalue(expr)).into()))
             }
 
             _ => self.parse_postfix_expr(scope),

@@ -65,6 +65,9 @@ pub enum TokenKind {
     #[subenum(UnaryOpKind)]
     AMP,
 
+    #[subenum(UnaryOpKind)]
+    BANG,
+
     #[subenum(BinaryOpKind)]
     EQEQ,
 
@@ -147,6 +150,7 @@ impl UnaryOpKind {
             MINUS => Neg,
             STAR => Deref,
             AMP => AddressOf,
+            BANG => Not,
         }
     }
 }

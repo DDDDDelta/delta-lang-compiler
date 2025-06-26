@@ -150,8 +150,7 @@ impl<'s> Lexer<'s> {
                 if self.eat_if_eq('=') {
                     return Some(self.pos.form_token(&start, TokenKind::BANGEQ));
                 }
-                eprintln!("unrecognized character: {}", curr);
-                None
+                return Some(self.pos.form_token(&start, TokenKind::BANG));
             }
 
             '+' => Some(self.pos.form_token(&start, TokenKind::PLUS)),

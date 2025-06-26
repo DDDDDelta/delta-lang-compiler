@@ -15,6 +15,13 @@ impl Type {
             _ => panic!("Expected function type"),
         }
     }
+
+    pub fn into_ptr_ty(self) -> PtrType {
+        match self {
+            Type::Ptr(ptr_type) => *ptr_type,
+            _ => panic!("Expected pointer type"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

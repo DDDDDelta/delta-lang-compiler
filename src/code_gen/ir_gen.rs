@@ -834,6 +834,13 @@ impl<'ctx> IRGen<'ctx> {
                             value.into_int_value(), "neg"
                         ).unwrap().into()
                     },
+                    
+                    UnaryOp::Not => {
+                        assert!(value.is_int_value());
+                        return self.builder.build_not(
+                            value.into_int_value(), "not"
+                        ).unwrap().into();
+                    }
                 }
             }
 

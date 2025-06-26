@@ -80,13 +80,7 @@ impl Expr {
                     Decl::Param(param_decl) => param_decl.ty().clone(),
                 }
             },
-            Expr::Unary(unary) => {
-                match unary.op() {
-                    UnaryOp::AddressOf => Type::Ptr(PtrType::new(unary.operand().ty()).into()),
-                    UnaryOp::Deref => unary.operand().ty().clone(),
-                    UnaryOp::Pos | UnaryOp::Neg => Type::I32,
-                }
-            },
+            Expr::Unary(unary) => unary.ty(),
             Expr::Assign(assign) => assign.lhs().ty().clone(),
             Expr::Binary(binary) => binary.ty(),
         }
@@ -249,6 +243,7 @@ impl BinaryExpr {
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum UnaryOp {
+    Not,
     AddressOf,
     Deref,
     Pos,
@@ -276,5 +271,14 @@ impl UnaryExpr {
 
     pub fn operand_mut(&mut self) -> &mut Expr {
         &mut self.operand
+    }
+
+    pub fn ty(&self) -> Type {
+        match self.op() {
+            UnaryOp::AddressOf => Type::Ptr(PtrType::new(self.operand().ty()).into()),
+            UnaryOp::Deref => self.operand().ty().into_ptr_ty().pointee().clone(),
+            UnaryOp::Pos | UnaryOp::Neg => Type::I32,
+            UnaryOp::Not => Type::Bool,
+        }
     }
 }
